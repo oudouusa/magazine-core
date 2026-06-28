@@ -169,6 +169,20 @@ toolchain: Rust 1.94+（rustfmt/clippy）、Python 3.x、C コンパイラ（rus
   protocol contract 変更は新しい evidence と docs/golden/tests の同時更新を必要とする。
 - 小さな PR・push 前にテスト green。
 
+## gap 受け入れ基準（downstream からの promotion）
+
+変更の多くは private downstream consumer の実運用で見つかった「汎用不足」として入ってくる。
+受け入れるのは **generic で evidence のあるもの**だけ。
+
+- **受け入れる**: protocol v1 の曖昧さ、複数 plugin が要る Python SDK helper、汎用 `host_fetch`
+  安全機能、汎用 `state_query` op、conformance fixture、canonical DB・`inspect`・migration の
+  汎用改善、**synthetic example で再現できる**不具合。
+- **受け入れない（downstream に残す）**: 特定実サイト向け logic、回避実装（proxy/cookie/
+  challenge）、実サイト名・実データ・実レスポンス、特定 source 専用の matching/retail/social。
+- 入れる前に確認: synthetic fixture で再現できるか? site 固有名・実データを含まないか?
+  protocol/SDK 契約変更なら docs/golden/tests を同じ PR で更新したか?
+- downstream 由来でも、実サイト事情を core に持ち込まない（上の hard rules を優先）。
+
 ## コミット規約
 
 - ブランチ命名: `feat/...` / `docs/...` / `chore/...`。
