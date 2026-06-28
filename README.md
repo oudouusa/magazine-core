@@ -8,34 +8,30 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **protocol v1 foundation 実装済み**。downstream の host-fetch と multi-stage
-  discovery / extension parity evidence では、v1 contract / code の追加変更は
-  不要と判断済み。conformance fixtures は beta readiness 向けに typed state と
-  non-empty `page_urls` の coverage を追加済み。
-- ADR-0001（Rust host + stdio plugin protocol）の status は downstream 側が所有する。
-  本 repo は v1 実装正本として、今後の変更を evidence-driven に扱う。
-- 外部公開（visibility 切替）は release hardening + 実 adapter 検証後に行う。
-- 由来: ADR-0001 の external vertical-slice prototype（2つの独立実装が双方向で
-  protocol 相互運用）。
-  仕様は `docs/` に置く pinned CONTRACT に従う。
+- **`0.1.0-beta.1` として公開済み**（GitHub prerelease）。`protocol_version = 1` /
+  `record_schema_version = 1` を beta として凍結し、以後の contract 変更は
+  evidence-driven に扱う。
+- protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
+  parity の検証で v1 contract の追加変更は不要と判断済み。conformance fixtures は
+  typed state と non-empty `page_urls` の coverage を含む。
+- 由来: ADR-0001（Rust host + stdio plugin protocol）の vertical-slice prototype
+  （2つの独立実装が双方向で protocol 相互運用）。仕様は `docs/` の pinned
+  CONTRACT に従う。
 
-## ロードマップ
+## 実装済み
 
-| PR | 内容 |
-|---|---|
-| PR1 | protocol foundation — framing codec / JSON-RPC 型 / pinned golden / conformance |
-| PR2 | DB + CLI — SourceRecord / 0001_initial / init-db / inspect / transaction・rollback |
-| PR3 | plugin host — plugins.d discovery / subprocess supervision / discover / spool / cancel・process-tree |
-| PR #6 | Python SDK foundation — framing / models / runtime / stdout guard / synthetic E2E |
-| PR #7 | DB-backed typed state — `known_source_urls` / summary / timestamps / fingerprint |
-| PR #8 | safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts |
-| PR #14 | protocol v1 audit — downstream evidence review; v1 unchanged |
-| PR #15 | Python SDK API freeze — stable root plugin-author API |
-| PR #16 | public docs cleanup — generic public docs, no protocol semantic change |
-| PR #17 | beta-readiness docs alignment |
-| current | conformance fixture inventory complete; release hardening prep |
-| current | release hardening script/workflow — binary/wheel checksums, wheel smoke, SBOM, license inventory, secret scan |
-| later | beta artifact — run hardening on clean main, then tag or record beta-candidate SHA |
+- protocol foundation — framing codec / JSON-RPC 型 / pinned golden / conformance
+- DB + CLI — SourceRecord / `0001_initial` / init-db / inspect / transaction・rollback
+- plugin host — `plugins.d` discovery / subprocess supervision / discover / spool / cancel・process-tree
+- Python SDK — framing / models / runtime / stdout guard / synthetic E2E、stable root plugin-author API（凍結）
+- DB-backed typed state — `known_source_urls` / summary / timestamps / fingerprint
+- safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts
+- release hardening — binary/wheel checksums / wheel smoke / SBOM / license inventory / secret scan
+
+## 今後
+
+- contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
+- 1.0 安定化は protocol / SDK の beta 運用を経てから判断する。
 
 ## 開発
 
