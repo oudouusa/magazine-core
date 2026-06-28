@@ -1,0 +1,10 @@
+[package]
+name = "mh-protocol"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Wire protocol (framing + JSON-RPC 2.0) for the magazine-core plugin host"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

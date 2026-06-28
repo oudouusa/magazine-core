@@ -1,0 +1,9 @@
+{
+  "id": "example",
+  "argv": ["python3", "examples/python-synthetic-plugin/synthetic_plugin.py"],
+  "env": {
+    "MH_SYNTHETIC_NOISE": "1",
+    "PYTHONPATH": "sdk/python/src"
+  },
+  "working_dir": ".."
+}

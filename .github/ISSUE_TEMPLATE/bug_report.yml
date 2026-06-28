@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a defect in the protocol, Rust host, SQLite schema, or Python SDK.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This repo is the generic core only. Do not paste
+        real site responses, cookies, credentials, private hostnames, or local
+        absolute paths. For security issues, use a private security report (see
+        SECURITY.md) instead of this form.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps or a synthetic example. Use synthetic data only.
+      placeholder: |
+        1. cargo run -p mh-cli -- init-db ./scratch.db
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - protocol (stdio / framing / JSON-RPC)
+        - Rust host / CLI
+        - SQLite schema / ingestor
+        - host_fetch broker
+        - Python SDK
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version (`cargo --version`), Python version, SDK version.
+    validations:
+      required: false
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no real site data, credentials, private paths, or hostnames.
+          required: true

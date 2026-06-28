@@ -1,0 +1,19 @@
+[package]
+name = "mh-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line tools for magazine-core"
+
+[[bin]]
+name = "mh"
+path = "src/main.rs"
+
+[dependencies]
+mh-db = { workspace = true }
+mh-host = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+mh-domain = { workspace = true }

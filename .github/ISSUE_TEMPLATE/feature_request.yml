@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a generic capability for the core protocol, host, schema, or SDK.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        magazine-core only takes **generic** capabilities. Production site
+        adapters, anti-bot evasion (proxy/cookie/challenge), and anything tied to
+        a specific real site are out of scope — write those as your own plugin
+        package. See CONTRIBUTING.md.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The generic gap you hit. What does the current contract not let you express?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What you would add or change, and roughly where (protocol/host/schema/SDK).
+    validations:
+      required: true
+  - type: dropdown
+    id: contract-impact
+    attributes:
+      label: Contract impact
+      description: Does this touch the frozen protocol v1 / record_schema v1 / SDK root API?
+      options:
+        - No contract change
+        - Changes protocol_version / record_schema_version
+        - Changes the Python SDK stable root API
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Confirmation
+      options:
+        - label: This is a generic capability, not a site-specific adapter or evasion logic.
+          required: true

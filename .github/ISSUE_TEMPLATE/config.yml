@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/oudouusa/magazine-core/security/advisories/new
+    about: Report a vulnerability privately. Do not open a public issue. See SECURITY.md.
+  - name: Site-specific adapter requests
+    url: https://github.com/oudouusa/magazine-core/blob/main/CONTRIBUTING.md
+    about: magazine-core does not accept production site adapters. Write them as your own plugin package.

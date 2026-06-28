@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mh-cli",
+    "crates/mh-db",
+    "crates/mh-domain",
+    "crates/mh-fetch",
+    "crates/mh-host",
+    "crates/mh-protocol",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.94"
+
+[workspace.dependencies]
+mh-db = { path = "crates/mh-db" }
+mh-domain = { path = "crates/mh-domain" }
+mh-fetch = { path = "crates/mh-fetch" }
+mh-host = { path = "crates/mh-host" }
+mh-protocol = { path = "crates/mh-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
