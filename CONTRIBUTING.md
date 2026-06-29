@@ -72,7 +72,7 @@ bash conformance/check_golden.sh
 # CLI smoke
 cargo run -p mh-cli -- init-db ./scratch.db
 cargo run -p mh-cli -- inspect ./scratch.db
-cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example
+cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 --per-page 30 --max-records 30
 ```
 
 Run the full set before opening a pull request.

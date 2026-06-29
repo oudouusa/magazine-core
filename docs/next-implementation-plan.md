@@ -47,8 +47,8 @@ Result:
 ```text
 protocol_version = 1 remains unchanged
 record_schema_version = 1 remains unchanged
-semantic contract remains unchanged
-golden fixtures now cover typed state and non-empty page URLs
+semantic contract now includes optional discover limits
+golden fixtures now cover typed state, discover limits, and non-empty page URLs
 ```
 
 The v1 contract already contains the generic fields and boundaries required for

@@ -11,6 +11,7 @@ downstream extension code.
 |---|---|---|
 | host_fetch | `crates/mh-protocol/golden/fetch_request.hex`, `conformance/golden.py`, `crates/mh-protocol/src/golden.rs`, `crates/mh-host/src/lib.rs::fetch_request_returns_provider_response_during_discover_loop`, `crates/mh-fetch/src/lib.rs` safe fetch policy tests, Python SDK `test_runtime_host_fetch_*` | covered |
 | typed state | `crates/mh-protocol/golden/state_query.hex`, `conformance/golden.py`, `crates/mh-protocol/src/golden.rs`, `crates/mh-host/src/lib.rs::state_query_returns_provider_values_during_discover_loop`, DB-backed state tests in `crates/mh-db/src/lib.rs`, CLI provider tests in `crates/mh-cli/src/main.rs`, Python SDK typed state tests | covered |
+| discover limits | `crates/mh-protocol/golden/discover.hex` pins optional `max_pages` / `max_records` / `per_page`; `crates/mh-cli/src/main.rs` forwards CLI flags; `crates/mh-host/src/lib.rs::discover_request_includes_optional_limits` covers host serialization | covered |
 | trusted self_fetch boundary | `docs/protocol-v1.md` §8/§9 and `SECURITY.md`; no `self_fetch` JSON-RPC method exists in `crates/mh-protocol/src/message.rs` | boundary documented; no core broker fixture by design |
 | external links | `record.hex` pins a typed non-empty `external_links` array; Rust domain/DB tests and Python SDK model/public API tests round-trip the same typed shape | covered |
 | page URLs | `record.hex` pins non-empty `page_urls`; Rust domain/DB tests, Python SDK public API tests, and the synthetic plugin example use non-empty `page_urls` | covered |
@@ -21,6 +22,8 @@ downstream extension code.
 - `state_query.hex` pins a `known_source_urls` request. The other typed state
   operations are behavior-tested in Rust host/DB/CLI and Python SDK tests
   because their wire envelope is identical apart from `op` and `args`.
+- `discover.hex` pins optional discover limits. `max_records` is host-enforced
+  during spool; `max_pages` and `per_page` are plugin-observed page scope hints.
 - `record.hex` pins non-empty `page_urls` and typed `external_links` in the
   same `SourceRecord` fixture.
 - `self_fetch` remains a trusted plugin capability boundary, not a host broker

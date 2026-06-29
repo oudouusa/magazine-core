@@ -30,8 +30,8 @@ message loop を実行する。site-specific adapter や proxy/cookie/challenge 
    `record_schema_version = 1` を検証する。
 3. host→plugin `discover` request を送り、応答待ち中に plugin→host の message を処理する。
 4. `record` notification は `SourceRecord` として検証し、memory spool に追加する。
-5. CLI `mh discover <db-path> <plugins-dir> <plugin-id>` は canonical DB を先に
-   open/init し、read-only state provider を渡して discovery を走らせる。
+5. CLI `mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N]` は canonical DB を先に
+   open/init し、read-only state provider と指定された discover limits を渡して discovery を走らせる。
 6. plugin が clean exit した後、spool を単一 DB transaction で ingest する。
 
 `state_query` / `fetch_request` は `discover` 応答待ちの間だけ受け付ける。
@@ -41,7 +41,7 @@ JSON-RPC id は plugin namespace の `p-*` string を必須にする。
 対応済み plugin→host traffic:
 
 - `record`: single `record` または `records` batch（最大100）。host は `discover.limits.max_records`
-  も memory spool 側で強制する。
+  も memory spool 側で強制する。`max_pages` / `per_page` は plugin が page-based discovery に使う scope hint。
 - `log`: host run result に保持する。
 - `state_query`: typed op だけ受け、CLI では canonical DB 由来の read-only state
   provider で応答する。任意 SQL は受け付けない。provider 未注入・backend error・不正 op は

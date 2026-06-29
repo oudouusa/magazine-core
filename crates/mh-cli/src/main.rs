@@ -37,47 +37,98 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
             );
             Ok(())
         }
-        [cmd, db_path, plugins_dir, plugin_id] if cmd == "discover" => {
-            let mut db = Database::open(PathBuf::from(db_path))?;
-            db.initialize()?;
-            let plugins = discover_plugins(PathBuf::from(plugins_dir))?;
-            let plugin = plugins
-                .iter()
-                .find(|plugin| plugin.id == *plugin_id)
-                .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
-            let run = {
-                let state_provider = DbStateProvider { db: &db };
-                PluginHost::default().run_discover_with_state_provider(
-                    plugin,
-                    "cli-run",
-                    DiscoverLimits::default(),
-                    std::time::Duration::from_secs(60),
-                    &state_provider,
-                )?
-            };
-            let ingest = db.ingest_records(&run.records)?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "plugin_id": plugin.id,
-                    "source_name": run.manifest.source_name,
-                    "discover_records": run.discover_records,
-                    "spooled_records": run.records.len(),
-                    "ingested_records": ingest.records,
-                    "exit_status": run.exit_status.as_ref().and_then(|status| status.code()),
-                    "logs": run.logs.iter().map(|log| {
-                        json!({"level": log.level, "message": log.message})
-                    }).collect::<Vec<_>>()
-                }))?
-            );
-            Ok(())
-        }
+        [cmd, rest @ ..] if cmd == "discover" => run_discover(rest),
         _ => Err("invalid arguments".into()),
     }
 }
 
+fn run_discover(args: &[String]) -> Result<(), Box<dyn Error>> {
+    if args.len() < 3 {
+        return Err("discover requires <db-path> <plugins-dir> <plugin-id>".into());
+    }
+    let db_path = &args[0];
+    let plugins_dir = &args[1];
+    let plugin_id = &args[2];
+    let limits = parse_discover_limits(&args[3..])?;
+    let mut db = Database::open(PathBuf::from(db_path))?;
+    db.initialize()?;
+    let plugins = discover_plugins(PathBuf::from(plugins_dir))?;
+    let plugin = plugins
+        .iter()
+        .find(|plugin| plugin.id == *plugin_id)
+        .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+    let run = {
+        let state_provider = DbStateProvider { db: &db };
+        PluginHost::default().run_discover_with_state_provider(
+            plugin,
+            "cli-run",
+            limits,
+            std::time::Duration::from_secs(60),
+            &state_provider,
+        )?
+    };
+    let ingest = db.ingest_records(&run.records)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "plugin_id": plugin.id,
+            "source_name": run.manifest.source_name,
+            "discover_records": run.discover_records,
+            "spooled_records": run.records.len(),
+            "ingested_records": ingest.records,
+            "exit_status": run.exit_status.as_ref().and_then(|status| status.code()),
+            "logs": run.logs.iter().map(|log| {
+                json!({"level": log.level, "message": log.message})
+            }).collect::<Vec<_>>()
+        }))?
+    );
+    Ok(())
+}
+
+fn parse_discover_limits(args: &[String]) -> Result<DiscoverLimits, Box<dyn Error>> {
+    let mut limits = DiscoverLimits::default();
+    let mut index = 0;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        let Some(value) = args.get(index + 1) else {
+            return Err(format!("{flag} requires a value").into());
+        };
+        let parsed = parse_limit_value(flag, value)?;
+        match flag {
+            "--max-pages" => {
+                if limits.max_pages.replace(parsed).is_some() {
+                    return Err("--max-pages specified more than once".into());
+                }
+            }
+            "--max-records" => {
+                if limits.max_records.replace(parsed).is_some() {
+                    return Err("--max-records specified more than once".into());
+                }
+            }
+            "--per-page" => {
+                if limits.per_page.replace(parsed).is_some() {
+                    return Err("--per-page specified more than once".into());
+                }
+            }
+            _ => return Err(format!("unknown discover option: {flag}").into()),
+        }
+        index += 2;
+    }
+    Ok(limits)
+}
+
+fn parse_limit_value(flag: &str, value: &str) -> Result<u64, Box<dyn Error>> {
+    let parsed = value.parse::<u64>().map_err(|_| -> Box<dyn Error> {
+        format!("{flag} must be a non-negative integer").into()
+    })?;
+    if matches!(flag, "--max-pages" | "--per-page") && parsed == 0 {
+        return Err(format!("{flag} must be greater than zero").into());
+    }
+    Ok(parsed)
+}
+
 fn usage() -> &'static str {
-    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id>"
+    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N]"
 }
 
 struct DbStateProvider<'a> {
@@ -240,6 +291,129 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": len(r
         let inspection = Database::inspect_path(&db_path).unwrap();
         assert_eq!(inspection.source_posts, 2);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn discover_forwards_cli_limits_to_plugin() {
+        let dir = temp_dir("discover-limits");
+        let db_path = dir.join("core.db");
+
+        let plugin = dir.join("plugin.py");
+        fs::write(
+            &plugin,
+            r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+limits = discover["params"]["limits"]
+expected = {"max_pages": 2, "max_records": 3, "per_page": 16}
+if limits != expected:
+    write_frame({"jsonrpc": "2.0", "id": discover["id"], "error": {
+        "code": -32000,
+        "message": json.dumps(limits, sort_keys=True)
+    }})
+else:
+    write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
+"#,
+        )
+        .unwrap();
+        let plugins_dir = dir.join("plugins.d");
+        fs::create_dir(&plugins_dir).unwrap();
+        fs::write(
+            plugins_dir.join("synthetic.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": [std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string()), plugin]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        run(vec![
+            "discover".to_string(),
+            db_path.to_string_lossy().to_string(),
+            plugins_dir.to_string_lossy().to_string(),
+            "synthetic".to_string(),
+            "--max-pages".to_string(),
+            "2".to_string(),
+            "--max-records".to_string(),
+            "3".to_string(),
+            "--per-page".to_string(),
+            "16".to_string(),
+        ])
+        .unwrap();
+
+        let inspection = Database::inspect_path(&db_path).unwrap();
+        assert_eq!(inspection.source_posts, 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn parse_discover_limits_accepts_optional_flags() {
+        let limits = parse_discover_limits(&[
+            "--max-pages".to_string(),
+            "2".to_string(),
+            "--max-records".to_string(),
+            "3".to_string(),
+            "--per-page".to_string(),
+            "16".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            limits,
+            DiscoverLimits {
+                max_pages: Some(2),
+                per_page: Some(16),
+                max_records: Some(3),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_discover_limits_rejects_unknown_duplicate_and_invalid_values() {
+        assert!(parse_discover_limits(&["--unknown".to_string(), "1".to_string()]).is_err());
+        assert!(
+            parse_discover_limits(&["--max-pages".to_string(), "--per-page".to_string()]).is_err()
+        );
+        assert!(parse_discover_limits(&[
+            "--max-records".to_string(),
+            "1".to_string(),
+            "--max-records".to_string(),
+            "2".to_string(),
+        ])
+        .is_err());
+        assert!(parse_discover_limits(&["--per-page".to_string(), "-1".to_string()]).is_err());
+        assert!(parse_discover_limits(&["--max-pages".to_string(), "0".to_string()]).is_err());
+        assert!(parse_discover_limits(&["--per-page".to_string(), "0".to_string()]).is_err());
+        assert!(parse_discover_limits(&["--max-records".to_string(), "0".to_string()]).is_ok());
     }
 
     #[test]

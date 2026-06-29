@@ -4,11 +4,13 @@
 adapter・回避実装・データは対象外（別 private 運用）。`protocol_version = 1`。
 
 2026-06-27 の downstream evidence audit では、host-fetch、typed state、page metadata、
-multi-stage discovery、extension parity の実装証跡を踏まえても、v1 contract、
-`record_schema_version = 1`、protocol code の変更は不要と判断した。その後の
-conformance fixture inventory で、typed state と non-empty `page_urls` の golden
-coverage を追加した。Python SDK の plugin-author API tier は `docs/python-sdk.md` を
-参照する。
+multi-stage discovery、extension parity の実装証跡を踏まえ、当時の v1 contract に
+追加変更は不要と判断した。その後の downstream evidence で generic な discover limit
+gap が出たため、`protocol_version = 1` の optional limits として `max_pages` /
+`max_records` / `per_page` を明文化した。`record_schema_version = 1` は変更しない。
+conformance fixture inventory は typed state、discover limits、non-empty `page_urls`
+の golden coverage を含む。Python SDK の plugin-author API tier は
+`docs/python-sdk.md` を参照する。
 
 ## 1. transport と framing
 
@@ -43,8 +45,9 @@ non-zero exit や終了しない plugin の spool は破棄する。
 host→plugin（request）:
 - `initialize` params `{ protocol_version, host_version }` → result `{ protocol_version, record_schema_version, manifest }`
   - `manifest`: `{ source_name, display_label, allowed_domains: [..], capabilities: [..] }`
-- `discover` params `{ request_id, limits: { max_pages?, max_records? }, remaining_ms }` → result `{ records: <int> }`
+- `discover` params `{ request_id, limits: { max_pages?, max_records?, per_page? }, remaining_ms }` → result `{ records: <int> }`
   - `records` は、この `request_id` で host が受理・spool した `SourceRecord` 件数と一致しなければならない。
+  - `limits.max_pages` / `limits.per_page` は discovery scope の hint。plugin が page-based source に使う。
   - `limits.max_records` が指定された場合、plugin はそれを超えて `record` を送ってはならない。host も spool 側で同じ上限を強制する。
 - `cancel` params `{ request_id }`（notification）
 
@@ -151,4 +154,4 @@ plugin は trusted な実行コード。subprocess はクラッシュと lifecyc
 
 ## 10. golden vectors
 
-`crates/mh-protocol/golden/*.hex` に、全 field 値を固定した4メッセージ（`initialize` / `record` / `fetch_request` / `state_query`）の framed バイト列（hex）を pin する。`record` は non-empty `page_urls` と typed `external_links` を含む。`conformance/golden.py`（独立 oracle）が生成し、Rust 実装の `frame_bytes` が byte 一致することを test と CI で検証する。
+`crates/mh-protocol/golden/*.hex` に、全 field 値を固定した5メッセージ（`initialize` / `discover` / `record` / `fetch_request` / `state_query`）の framed バイト列（hex）を pin する。`discover` は optional limits (`max_pages` / `max_records` / `per_page`) を含む。`record` は non-empty `page_urls` と typed `external_links` を含む。`conformance/golden.py`（独立 oracle）が生成し、Rust 実装の `frame_bytes` が byte 一致することを test と CI で検証する。

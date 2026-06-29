@@ -3,6 +3,16 @@
 All notable changes to magazine-core are documented here. This project adheres
 to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `mh discover` accepts optional discover limits:
+  host-enforced `--max-records` plus page-scope hints `--max-pages` and
+  `--per-page`.
+- Protocol conformance now includes a pinned `discover` request fixture with
+  optional discover limits.
+
 ## [0.1.0-beta.1] - 2026-06-28
 
 First public beta of magazine-core: a protocol-first ingestion core for
