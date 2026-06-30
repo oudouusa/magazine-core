@@ -155,6 +155,8 @@ pub struct DiscoverLimits {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_pages: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub per_page: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_records: Option<u64>,
 }
 
@@ -162,6 +164,7 @@ impl DiscoverLimits {
     fn with_host_caps(self) -> Self {
         Self {
             max_pages: self.max_pages,
+            per_page: self.per_page,
             max_records: Some(
                 self.max_records
                     .unwrap_or(HOST_MAX_RECORDS)
@@ -326,11 +329,13 @@ pub struct PluginHost {
     shutdown_grace: Duration,
 }
 
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+
 impl Default for PluginHost {
     fn default() -> Self {
         Self {
             host_version: format!("mh-host/{}", env!("CARGO_PKG_VERSION")),
-            shutdown_grace: Duration::from_millis(150),
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
 }
@@ -1949,12 +1954,85 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 1}})
             "run-max-records",
             DiscoverLimits {
                 max_pages: None,
+                per_page: None,
                 max_records: Some(0),
             },
             Duration::from_secs(5),
         );
 
         assert_protocol_error_contains(result, "record spool exceeded max_records");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn discover_request_includes_optional_limits() {
+        let dir = temp_dir("discover-limits");
+        let plugin = write_plugin(
+            &dir,
+            r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+limits = discover["params"]["limits"]
+expected = {"max_pages": 2, "max_records": 3, "per_page": 16}
+if limits != expected:
+    write_frame({"jsonrpc": "2.0", "id": discover["id"], "error": {
+        "code": -32000,
+        "message": json.dumps(limits, sort_keys=True)
+    }})
+else:
+    write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
+"#,
+        );
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let run = PluginHost::default()
+            .run_discover(
+                &plugins[0],
+                "run-limits",
+                DiscoverLimits {
+                    max_pages: Some(2),
+                    per_page: Some(16),
+                    max_records: Some(3),
+                },
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+        assert_eq!(run.discover_records, 0);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2134,6 +2212,69 @@ sys.exit(7)
             result,
             Err(HostError::PluginExitStatus(status)) if !status.success()
         ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn accepts_prompt_clean_exit_after_discover_response() {
+        let dir = temp_dir("prompt-clean-exit");
+        let plugin = write_plugin(
+            &dir,
+            r#"
+import json
+import struct
+import sys
+import time
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
+time.sleep(0.25)
+"#,
+        );
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let run = PluginHost::default()
+            .run_discover(
+                &plugins[0],
+                "run-prompt-clean-exit",
+                DiscoverLimits::default(),
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+        assert_eq!(run.discover_records, 0);
+        assert!(matches!(run.exit_status, Some(status) if status.success()));
         fs::remove_dir_all(dir).unwrap();
     }
 

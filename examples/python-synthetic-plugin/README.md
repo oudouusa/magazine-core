@@ -6,7 +6,7 @@ stdout guard, and Rust host ingest path without using real website data.
 Run from the repository root:
 
 ```bash
-cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example
+cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 --per-page 30 --max-records 30
 ```
 
 The plugin emits one synthetic `SourceRecord` and optional stdout noise. The

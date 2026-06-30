@@ -18,6 +18,19 @@ pub fn messages() -> Vec<(&'static str, Value)> {
             }),
         ),
         (
+            "discover",
+            json!({
+                "jsonrpc": "2.0",
+                "id": "h-2",
+                "method": "discover",
+                "params": {
+                    "request_id": "run-1",
+                    "limits": {"max_pages": 2, "max_records": 3, "per_page": 16},
+                    "remaining_ms": 1000
+                }
+            }),
+        ),
+        (
             "record",
             json!({
                 "jsonrpc": "2.0",

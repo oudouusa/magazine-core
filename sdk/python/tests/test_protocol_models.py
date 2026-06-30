@@ -112,6 +112,15 @@ def test_sdk_frames_match_pinned_golden_fixtures() -> None:
             Method.RECORD,
             {"request_id": "run-1", "record": _golden_record()},
         ),
+        "discover": request(
+            "h-2",
+            Method.DISCOVER,
+            {
+                "request_id": "run-1",
+                "limits": {"max_pages": 2, "max_records": 3, "per_page": 16},
+                "remaining_ms": 1000,
+            },
+        ),
         "fetch_request": request(
             "p-1",
             Method.FETCH_REQUEST,
