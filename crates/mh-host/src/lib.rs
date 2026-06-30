@@ -329,11 +329,13 @@ pub struct PluginHost {
     shutdown_grace: Duration,
 }
 
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+
 impl Default for PluginHost {
     fn default() -> Self {
         Self {
             host_version: format!("mh-host/{}", env!("CARGO_PKG_VERSION")),
-            shutdown_grace: Duration::from_millis(150),
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
 }
@@ -2210,6 +2212,69 @@ sys.exit(7)
             result,
             Err(HostError::PluginExitStatus(status)) if !status.success()
         ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn accepts_prompt_clean_exit_after_discover_response() {
+        let dir = temp_dir("prompt-clean-exit");
+        let plugin = write_plugin(
+            &dir,
+            r#"
+import json
+import struct
+import sys
+import time
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
+time.sleep(0.25)
+"#,
+        );
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let run = PluginHost::default()
+            .run_discover(
+                &plugins[0],
+                "run-prompt-clean-exit",
+                DiscoverLimits::default(),
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+        assert_eq!(run.discover_records, 0);
+        assert!(matches!(run.exit_status, Some(status) if status.success()));
         fs::remove_dir_all(dir).unwrap();
     }
 
