@@ -11,7 +11,14 @@ import pytest
 
 from magazine_core_plugin_sdk.framing import frame_bytes, read_json_frame
 from magazine_core_plugin_sdk.models import SourceRecord
-from magazine_core_plugin_sdk.protocol import Method, notification, request, response, response_error
+from magazine_core_plugin_sdk.protocol import (
+    MAX_RECORD_BATCH,
+    Method,
+    notification,
+    request,
+    response,
+    response_error,
+)
 from magazine_core_plugin_sdk.runtime import HostRequestError, PluginManifest, PluginRuntime
 
 
@@ -59,6 +66,87 @@ def test_runtime_initialize_discover_record_and_log() -> None:
     assert record["method"] == "record"
     assert record["params"]["record"]["source_url"] == "synthetic://post/1"
     assert discover_response["result"] == {"records": 1}
+
+
+def test_runtime_send_records_emits_batched_record_notifications() -> None:
+    record_count = MAX_RECORD_BATCH * 2 + 5
+
+    def discover(context, _params):
+        context.send_records(
+            {
+                "source_name": "synthetic",
+                "source_url": f"synthetic://post/{index}",
+                "title": f"Synthetic {index}",
+                "brand_raw": "Synthetic Brand",
+            }
+            for index in range(record_count)
+        )
+
+    reader = _frames(
+        request("h-1", Method.INITIALIZE, {"protocol_version": 1, "host_version": "test"}),
+        request(
+            "h-2",
+            Method.DISCOVER,
+            {"request_id": "run-batch", "limits": {}, "remaining_ms": 1000},
+        ),
+    )
+    writer = io.BytesIO()
+    runtime = PluginRuntime(
+        PluginManifest("synthetic", "Synthetic"),
+        discover,
+        reader=reader,
+        writer=writer,
+    )
+
+    runtime.run()
+
+    writer.seek(0)
+    init_response = read_json_frame(writer)
+    batches = [read_json_frame(writer), read_json_frame(writer), read_json_frame(writer)]
+    discover_response = read_json_frame(writer)
+
+    assert init_response["result"]["manifest"]["source_name"] == "synthetic"
+    assert [len(batch["params"]["records"]) for batch in batches] == [
+        MAX_RECORD_BATCH,
+        MAX_RECORD_BATCH,
+        5,
+    ]
+    for batch in batches:
+        assert batch["method"] == "record"
+        assert batch["params"]["request_id"] == "run-batch"
+        assert "record" not in batch["params"]
+    assert batches[0]["params"]["records"][0]["source_url"] == "synthetic://post/0"
+    assert batches[2]["params"]["records"][4]["source_url"] == "synthetic://post/204"
+    assert discover_response["result"] == {"records": record_count}
+
+
+def test_runtime_send_records_empty_iterable_emits_no_record_frame() -> None:
+    def discover(context, _params):
+        context.send_records([])
+
+    reader = _frames(
+        request("h-1", Method.INITIALIZE, {"protocol_version": 1, "host_version": "test"}),
+        request(
+            "h-2",
+            Method.DISCOVER,
+            {"request_id": "run-empty-batch", "limits": {}, "remaining_ms": 1000},
+        ),
+    )
+    writer = io.BytesIO()
+    runtime = PluginRuntime(
+        PluginManifest("synthetic", "Synthetic"),
+        discover,
+        reader=reader,
+        writer=writer,
+    )
+
+    runtime.run()
+
+    writer.seek(0)
+    init_response = read_json_frame(writer)
+    discover_response = read_json_frame(writer)
+    assert init_response["result"]["manifest"]["source_name"] == "synthetic"
+    assert discover_response["result"] == {"records": 0}
 
 
 def test_runtime_cancel_watcher_marks_context_cancelled() -> None:
@@ -457,6 +545,75 @@ def test_python_synthetic_plugin_ingests_via_rust_host(tmp_path: Path) -> None:
     assert output["discover_records"] == 1
     assert output["spooled_records"] == 1
     assert output["ingested_records"] == 1
+
+
+def test_python_send_records_ingests_via_rust_host(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[3]
+    plugin = tmp_path / "batch_plugin.py"
+    plugin.write_text(
+        """
+from magazine_core_plugin_sdk import MAX_RECORD_BATCH, SourceRecord, run_plugin
+
+def discover(context, _params):
+    records = [
+        SourceRecord(
+            source_name="synthetic",
+            source_url=f"synthetic://batch/{index}",
+            title=f"Synthetic Batch {index}",
+            brand_raw="Synthetic Brand",
+        )
+        for index in range(MAX_RECORD_BATCH + 1)
+    ]
+    context.send_records(records)
+
+if __name__ == "__main__":
+    run_plugin(
+        source_name="synthetic",
+        display_label="Batch",
+        discover=discover,
+    )
+""".lstrip(),
+        encoding="utf-8",
+    )
+    plugins_dir = tmp_path / "plugins.d"
+    plugins_dir.mkdir()
+    (plugins_dir / "batch.json").write_text(
+        json.dumps(
+            {
+                "id": "batch",
+                "argv": [sys.executable, str(plugin)],
+                "env": {"PYTHONPATH": str(root / "sdk/python/src")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "-p",
+            "mh-cli",
+            "--",
+            "discover",
+            str(tmp_path / "batch.db"),
+            str(plugins_dir),
+            "batch",
+        ],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    output = json.loads(result.stdout)
+
+    assert output["plugin_id"] == "batch"
+    assert output["source_name"] == "synthetic"
+    assert output["discover_records"] == MAX_RECORD_BATCH + 1
+    assert output["spooled_records"] == MAX_RECORD_BATCH + 1
+    assert output["ingested_records"] == MAX_RECORD_BATCH + 1
 
 
 def test_python_plugin_record_count_mismatch_fails_closed(tmp_path: Path) -> None:

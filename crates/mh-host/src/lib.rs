@@ -618,6 +618,12 @@ impl PluginHost {
         manifest: &PluginManifest,
         state: &mut RunState,
     ) -> Result<(), HostError> {
+        if params.get("record").is_some() && params.get("records").is_some() {
+            return Err(HostError::Protocol(
+                "record must specify either record or records".to_string(),
+            ));
+        }
+
         if let Some(record) = params.get("record") {
             state.reserve_record_values([record])?;
             let record: SourceRecord =
@@ -1220,6 +1226,62 @@ mod tests {
         .unwrap();
     }
 
+    fn write_record_batch_plugin(
+        dir: &Path,
+        record_count: usize,
+        returned_count: usize,
+    ) -> PathBuf {
+        let body = r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+request_id = discover["params"]["request_id"]
+records = []
+for index in range(RECORD_COUNT):
+    records.append({
+        "source_name": "synthetic",
+        "source_url": f"synthetic://post/{index}",
+        "title": f"Synthetic {index}",
+        "brand_raw": "Synthetic Brand"
+    })
+write_frame({"jsonrpc": "2.0", "method": "record", "params": {
+    "request_id": request_id,
+    "records": records
+}})
+write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETURNED_COUNT}})
+"#
+        .replace("RECORD_COUNT", &record_count.to_string())
+        .replace("RETURNED_COUNT", &returned_count.to_string());
+        write_plugin(dir, &body)
+    }
+
     fn assert_protocol_error_contains(result: Result<HostRun, HostError>, expected: &str) {
         match result {
             Err(HostError::Protocol(message)) => {
@@ -1438,6 +1500,155 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 1}})
         assert_eq!(run.records.len(), 1);
         assert_eq!(run.records[0].source_url, "synthetic://post/1");
         assert_eq!(run.logs[0].message, "discovering");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn accepts_record_batch_notification_and_spools_all_records() {
+        let dir = temp_dir("record-batch");
+        let plugin = write_record_batch_plugin(&dir, 25, 25);
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let run = PluginHost::default()
+            .run_discover(
+                &plugins[0],
+                "run-record-batch",
+                DiscoverLimits::default(),
+                Duration::from_secs(5),
+            )
+            .unwrap();
+
+        assert_eq!(run.discover_records, 25);
+        assert_eq!(run.records.len(), 25);
+        for (index, record) in run.records.iter().enumerate() {
+            assert_eq!(record.source_url, format!("synthetic://post/{index}"));
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_record_batch_larger_than_max_record_batch() {
+        let dir = temp_dir("record-batch-too-large");
+        let plugin = write_record_batch_plugin(&dir, MAX_RECORD_BATCH + 1, MAX_RECORD_BATCH + 1);
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let result = PluginHost::default().run_discover(
+            &plugins[0],
+            "run-record-batch-too-large",
+            DiscoverLimits::default(),
+            Duration::from_secs(5),
+        );
+
+        assert_protocol_error_contains(result, "record batch too large");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_record_notification_with_single_and_batch_payloads() {
+        let dir = temp_dir("record-batch-ambiguous");
+        let plugin = write_plugin(
+            &dir,
+            r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+
+discover = read_frame()
+request_id = discover["params"]["request_id"]
+record = {
+    "source_name": "synthetic",
+    "source_url": "synthetic://post/ambiguous",
+    "title": "Synthetic Ambiguous",
+    "brand_raw": "Synthetic Brand"
+}
+write_frame({"jsonrpc": "2.0", "method": "record", "params": {
+    "request_id": request_id,
+    "record": record,
+    "records": [record]
+}})
+write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 1}})
+"#,
+        );
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let result = PluginHost::default().run_discover(
+            &plugins[0],
+            "run-record-batch-ambiguous",
+            DiscoverLimits::default(),
+            Duration::from_secs(5),
+        );
+
+        assert_protocol_error_contains(result, "either record or records");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn enforces_max_records_limit_across_record_batch() {
+        let dir = temp_dir("record-batch-max-records");
+        let plugin = write_record_batch_plugin(&dir, 2, 2);
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+
+        let result = PluginHost::default().run_discover(
+            &plugins[0],
+            "run-record-batch-max-records",
+            DiscoverLimits {
+                max_pages: None,
+                per_page: None,
+                max_records: Some(1),
+            },
+            Duration::from_secs(5),
+        );
+
+        assert_protocol_error_contains(result, "record spool exceeded max_records");
         fs::remove_dir_all(dir).unwrap();
     }
 

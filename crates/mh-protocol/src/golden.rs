@@ -67,6 +67,70 @@ pub fn messages() -> Vec<(&'static str, Value)> {
             }),
         ),
         (
+            "record_batch",
+            json!({
+                "jsonrpc": "2.0",
+                "method": "record",
+                "params": {
+                    "request_id": "run-1",
+                    "records": [
+                        {
+                            "source_name": "golden",
+                            "source_url": "golden://1",
+                            "title": "Golden One",
+                            "brand_raw": "Golden Brand",
+                            "brand_normalized": "golden brand",
+                            "normalizer_id": "golden",
+                            "normalizer_version": "1",
+                            "performers_raw": ["P1", "P2"],
+                            "cover_urls": ["golden://c1"],
+                            "page_urls": ["golden://page/1"],
+                            "issue_no": "No.1",
+                            "external_links": [
+                                {
+                                    "url": "https://example.test/p1",
+                                    "provider": "example",
+                                    "label": null,
+                                    "kind": "retail",
+                                    "external_id": "X1",
+                                    "metadata": {}
+                                }
+                            ],
+                            "release_date": "2026-06-01",
+                            "post_date": null,
+                            "extra": {}
+                        },
+                        {
+                            "source_name": "golden",
+                            "source_url": "golden://2",
+                            "title": "Golden Two",
+                            "brand_raw": "Golden Brand",
+                            "brand_normalized": "golden brand",
+                            "normalizer_id": "golden",
+                            "normalizer_version": "1",
+                            "performers_raw": ["P1", "P2"],
+                            "cover_urls": ["golden://c1"],
+                            "page_urls": ["golden://page/1"],
+                            "issue_no": "No.1",
+                            "external_links": [
+                                {
+                                    "url": "https://example.test/p1",
+                                    "provider": "example",
+                                    "label": null,
+                                    "kind": "retail",
+                                    "external_id": "X1",
+                                    "metadata": {}
+                                }
+                            ],
+                            "release_date": "2026-06-01",
+                            "post_date": null,
+                            "extra": {}
+                        }
+                    ]
+                }
+            }),
+        ),
+        (
             "fetch_request",
             json!({
                 "jsonrpc": "2.0",

@@ -67,13 +67,15 @@ run_plugin(
 
 The discover callback receives a `PluginContext` and the raw `discover` params.
 It may return an integer record count. If it returns `None`, the runtime returns
-the number of records sent through `context.send_record()`.
+the number of records sent through `context.send_record()` and
+`context.send_records()`.
 
 ## Context Methods
 
 Stable `PluginContext` methods:
 
 - `send_record(record)`
+- `send_records(records)`
 - `log(level, message)`
 - `host_fetch(url, method="GET", headers=None, timeout=30.0)`
 - `known_source_urls(source_name, timeout=30.0)`
@@ -82,6 +84,11 @@ Stable `PluginContext` methods:
 - `content_fingerprint(source_name, source_url, timeout=30.0)`
 - `is_cancelled()`
 - `wait_cancelled(timeout=None)`
+
+Use `send_records(records)` when a plugin has already collected multiple
+records. The SDK emits `record` notifications with `records` batches of at most
+`MAX_RECORD_BATCH`; an empty iterable emits no record frame. Each item may be a
+`SourceRecord` or mapping with the v1 source-record fields.
 
 `host_fetch()` raises `HostRequestError` when the host returns a JSON-RPC error.
 Typed state helpers also raise `HostRequestError` for host-side errors and

@@ -54,7 +54,10 @@ host→plugin（request）:
 plugin→host:
 - `fetch_request` params `{ id, request: { url, method, headers? } }` → result `{ id, status, final_url, body_base64 }`
 - `state_query` params `{ id, op, args }` → result `{ id, result }`（op は §6）
-- `record` params `{ request_id, record: <SourceRecord> }`（notification, batch ≤100）
+- `record` params `{ request_id, record: <SourceRecord> }` または
+  `{ request_id, records: [<SourceRecord>, ...] }`（notification, batch ≤100）。
+  `record` と `records` の同時指定は malformed。`records` batch は単一 `discover`
+  request の spool 上限と byte 上限を共有する。
 - `log` params `{ level, message }`（notification, host は stderr へ）
 
 malformed / oversized frame / unknown method は fail-closed（host は plugin を異常終了扱いにし ingest を rollback）。
@@ -154,4 +157,4 @@ plugin は trusted な実行コード。subprocess はクラッシュと lifecyc
 
 ## 10. golden vectors
 
-`crates/mh-protocol/golden/*.hex` に、全 field 値を固定した5メッセージ（`initialize` / `discover` / `record` / `fetch_request` / `state_query`）の framed バイト列（hex）を pin する。`discover` は optional limits (`max_pages` / `max_records` / `per_page`) を含む。`record` は non-empty `page_urls` と typed `external_links` を含む。`conformance/golden.py`（独立 oracle）が生成し、Rust 実装の `frame_bytes` が byte 一致することを test と CI で検証する。
+`crates/mh-protocol/golden/*.hex` に、全 field 値を固定した6メッセージ（`initialize` / `discover` / `record` / `record_batch` / `fetch_request` / `state_query`）の framed バイト列（hex）を pin する。`discover` は optional limits (`max_pages` / `max_records` / `per_page`) を含む。`record` と `record_batch` は non-empty `page_urls` と typed `external_links` を含む。`conformance/golden.py`（独立 oracle）が生成し、Rust 実装の `frame_bytes` が byte 一致することを test と CI で検証する。

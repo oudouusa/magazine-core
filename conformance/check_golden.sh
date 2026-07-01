@@ -7,7 +7,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 python3 conformance/golden.py "$tmp"
 fail=0
-for n in initialize discover record fetch_request state_query; do
+for n in initialize discover record record_batch fetch_request state_query; do
   if ! diff -u "crates/mh-protocol/golden/$n.hex" "$tmp/$n.hex"; then
     echo "MISMATCH: $n.hex" >&2
     fail=1
