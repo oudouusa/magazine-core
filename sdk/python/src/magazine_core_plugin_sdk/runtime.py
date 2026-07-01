@@ -9,13 +9,14 @@ import select
 import struct
 import sys
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Callable, Optional
 
 from .framing import MAX_FRAME, read_json_frame, write_json_frame
 from .models import SourceRecord
 from .protocol import (
+    MAX_RECORD_BATCH,
     PROTOCOL_VERSION,
     RECORD_SCHEMA_VERSION,
     Method,
@@ -113,7 +114,7 @@ class PluginContext:
         self._cancelled.set()
 
     def send_record(self, record: SourceRecord | Mapping[str, Any]) -> None:
-        payload = record.to_dict() if isinstance(record, SourceRecord) else dict(record)
+        payload = self._record_payload(record)
         self._runtime.write(
             notification(
                 Method.RECORD,
@@ -121,6 +122,29 @@ class PluginContext:
             )
         )
         self._records += 1
+
+    def send_records(self, records: Iterable[SourceRecord | Mapping[str, Any]]) -> None:
+        batch: list[dict[str, Any]] = []
+        for record in records:
+            batch.append(self._record_payload(record))
+            if len(batch) == MAX_RECORD_BATCH:
+                self._send_record_batch(batch)
+                batch = []
+        if batch:
+            self._send_record_batch(batch)
+
+    @staticmethod
+    def _record_payload(record: SourceRecord | Mapping[str, Any]) -> dict[str, Any]:
+        return record.to_dict() if isinstance(record, SourceRecord) else dict(record)
+
+    def _send_record_batch(self, records: list[dict[str, Any]]) -> None:
+        self._runtime.write(
+            notification(
+                Method.RECORD,
+                {"request_id": self.request_id, "records": records},
+            )
+        )
+        self._records += len(records)
 
     def log(self, level: str, message: str) -> None:
         self._runtime.write(

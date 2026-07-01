@@ -102,6 +102,9 @@ def test_source_record_with_external_links_matches_golden_record_frame() -> None
 
 def test_sdk_frames_match_pinned_golden_fixtures() -> None:
     root = Path(__file__).resolve().parents[3]
+    batch_record = _golden_record().to_dict()
+    batch_record["source_url"] = "golden://2"
+    batch_record["title"] = "Golden Two"
     messages = {
         "initialize": request(
             "h-1",
@@ -111,6 +114,13 @@ def test_sdk_frames_match_pinned_golden_fixtures() -> None:
         "record": notification(
             Method.RECORD,
             {"request_id": "run-1", "record": _golden_record()},
+        ),
+        "record_batch": notification(
+            Method.RECORD,
+            {
+                "request_id": "run-1",
+                "records": [_golden_record().to_dict(), batch_record],
+            },
         ),
         "discover": request(
             "h-2",

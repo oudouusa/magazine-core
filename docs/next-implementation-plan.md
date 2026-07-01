@@ -46,6 +46,8 @@ Post-release on the current repo:
 - prompt plugin shutdown grace in the host
 - two-repo development contract docs (#4)
 - AGENTS.md redesign for post-beta evidence-driven development (#5)
+- Python SDK batched record emission over the existing protocol v1 `records`
+  notification shape, with host regressions and a pinned conformance fixture
 
 ## Protocol v1 Audit Result
 
@@ -77,19 +79,14 @@ code.
 Ordered by downstream evidence; each item lands as a small PR set with
 synthetic tests and public-safe docs:
 
-1. **Batched record emission** — first downstream-evidenced generic gap:
-   one-frame-per-record emission can hit host queue/runtime limits, forcing
-   downstream consumers to cap record counts per run. Prefer an additive
-   optional capability within protocol v1; decide between SDK-level batching
-   and host queue behavior from a synthetic reproduction.
-2. **Bounded plugin runtime limits** — implement only if a synthetic plugin
+1. **Bounded plugin runtime limits** — implement only if a synthetic plugin
    reproduces a generic runtime-limit gap; otherwise this stays a downstream
    concern.
-3. **Release artifact automation** — attach hardened binaries / wheels /
+2. **Release artifact automation** — attach hardened binaries / wheels /
    checksums / SBOM to GitHub Releases so downstream consumers can verify and
    consume by version/checksum without a local checkout.
-4. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
-5. **Python SDK ergonomics** only when real wrappers need them.
+3. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
+4. **Python SDK ergonomics** only when real wrappers need them.
 
 ## Maintainer Product Scope (contract-neutral)
 
