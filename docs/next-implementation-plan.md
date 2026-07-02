@@ -81,16 +81,42 @@ for the audited downstream evidence. Remaining work must avoid site-specific
 names, real responses, cookies, proxy/challenge logic, and private extension
 code.
 
-## Current Priority: Evidence-Driven Queue
+## Evidence-Driven Queue Status
 
-Ordered by downstream evidence; each item lands as a small PR set with
-synthetic tests and public-safe docs:
+Current status as of 2026-07-02:
 
-1. **Release artifact consumption proof** — cut or select the next beta Release
-   for the current main commit, run the release publish workflow, and let
-   downstream flip its lock to release-mode checksums in a standalone PR.
-2. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
-3. **Python SDK ergonomics** only when real wrappers need them.
+- release artifact consumption proof is complete through `0.1.0-beta.2`;
+  the GitHub Release contains the Linux binary, canonical Python wheel, SBOM,
+  and `SHA256SUMS.txt`, and downstream consumes the release-mode checksums.
+- downstream core-improvement intake is empty after closing hub-only private
+  manifest handling and accepted runtime DDL residual monitoring out of the
+  core promotion queue.
+- GitHub open issues, open pull requests, and repository security advisories
+  were checked during the C4 current-window audit and no public support item
+  was pending.
+
+Standing evidence-driven intake remains:
+
+- **Conformance fixtures** for downstream-proven edge cases, synthetic only.
+- **Python SDK ergonomics** only when real wrappers need them.
+
+Do not add speculative core capabilities before a real adapter exposes a
+generic gap.
+
+## Current Priority: Standalone Distribution
+
+Next bounded work starts the maintainer-approved product scope without changing
+`protocol_version`, `record_schema_version`, the Python SDK root API, or the
+canonical DB schema:
+
+1. Document and verify a quickstart where public release artifacts alone can run
+   install -> `init-db` -> synthetic example `discover` -> `inspect`.
+2. Record the distribution-channel decision. GitHub Release artifacts remain
+   the source of truth; `cargo install`, PyPI, and Docker are evaluated only if
+   their cost/benefit justifies adding another channel.
+3. Lock version discipline so binary, wheel, tag, and CHANGELOG agree and
+   release hardening verifies that agreement.
+4. Add a cold-start check in a clean environment or CI.
 
 ## Maintainer Product Scope (contract-neutral)
 
