@@ -52,6 +52,36 @@ struct PluginDefinitionFile {
     working_dir: Option<String>,
 }
 
+/// Best-effort read-only inspection of a `plugins.d` command manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginManifestInspection {
+    pub file_name: String,
+    pub id: Option<String>,
+    pub source_name: Option<String>,
+    pub argv: Vec<String>,
+    pub argv_len: usize,
+    pub env_keys: Vec<String>,
+    pub working_dir: Option<WorkingDirKind>,
+    pub status: PluginManifestStatus,
+    pub errors: Vec<String>,
+}
+
+/// Whether a command manifest passed basic host-side validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginManifestStatus {
+    Valid,
+    Invalid,
+}
+
+/// Path kind for a configured plugin working directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingDirKind {
+    Relative,
+    Absolute,
+}
+
 /// Discover JSON plugin definitions from a directory.
 ///
 /// Manifest shape:
@@ -124,6 +154,123 @@ pub fn discover_plugins(dir: impl AsRef<Path>) -> Result<Vec<PluginDefinition>, 
         });
     }
     Ok(plugins)
+}
+
+/// Inspect JSON plugin definitions from a directory without executing them.
+///
+/// Unlike [`discover_plugins`], this is best-effort and returns invalid
+/// manifests with their validation errors so a read-only UI can show the full
+/// directory state. Local paths and environment values are redacted in the
+/// returned view.
+pub fn inspect_plugin_manifests(
+    dir: impl AsRef<Path>,
+) -> Result<Vec<PluginManifestInspection>, HostError> {
+    let dir = dir.as_ref();
+    let mut entries = fs::read_dir(dir)
+        .map_err(HostError::Io)?
+        .collect::<Result<Vec<_>, io::Error>>()
+        .map_err(HostError::Io)?;
+    entries.sort_by_key(|entry| entry.path());
+
+    let mut inspections = Vec::new();
+    let mut id_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let file_name = display_file_name(&path);
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(err) => {
+                inspections.push(PluginManifestInspection {
+                    file_name,
+                    id: None,
+                    source_name: None,
+                    argv: Vec::new(),
+                    argv_len: 0,
+                    env_keys: Vec::new(),
+                    working_dir: None,
+                    status: PluginManifestStatus::Invalid,
+                    errors: vec![format!("failed to read manifest: {err}")],
+                });
+                continue;
+            }
+        };
+        let parsed: PluginDefinitionFile = match serde_json::from_str(&raw) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                inspections.push(PluginManifestInspection {
+                    file_name,
+                    id: None,
+                    source_name: None,
+                    argv: Vec::new(),
+                    argv_len: 0,
+                    env_keys: Vec::new(),
+                    working_dir: None,
+                    status: PluginManifestStatus::Invalid,
+                    errors: vec![format!("invalid json: {err}")],
+                });
+                continue;
+            }
+        };
+        let mut errors = Vec::new();
+        if parsed.argv.is_empty() {
+            errors.push("argv is empty".to_string());
+        }
+        let id = parsed
+            .id
+            .clone()
+            .or(parsed.source_name.clone())
+            .or_else(|| {
+                path.file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            });
+        match id.as_deref() {
+            Some(id) if id.trim().is_empty() => errors.push("id is empty".to_string()),
+            Some(id) => {
+                *id_counts.entry(id.to_string()).or_default() += 1;
+            }
+            None => errors.push("id is missing".to_string()),
+        }
+        let working_dir = parsed.working_dir.as_deref().map(|value| {
+            if Path::new(value).is_absolute() {
+                WorkingDirKind::Absolute
+            } else {
+                WorkingDirKind::Relative
+            }
+        });
+        inspections.push(PluginManifestInspection {
+            file_name,
+            id,
+            source_name: parsed.source_name,
+            argv_len: parsed.argv.len(),
+            argv: parsed
+                .argv
+                .iter()
+                .map(|arg| redact_manifest_arg(arg))
+                .collect(),
+            env_keys: parsed.env.keys().map(|key| redact_env_key(key)).collect(),
+            working_dir,
+            status: PluginManifestStatus::Valid,
+            errors,
+        });
+    }
+
+    for inspection in &mut inspections {
+        if let Some(id) = inspection.id.as_deref() {
+            if id_counts.get(id).copied().unwrap_or_default() > 1 {
+                inspection
+                    .errors
+                    .push(format!("duplicate plugin id {id:?}"));
+            }
+        }
+        if !inspection.errors.is_empty() {
+            inspection.status = PluginManifestStatus::Invalid;
+        }
+    }
+    Ok(inspections)
 }
 
 /// Host-side view of the plugin's manifest.
@@ -1192,6 +1339,46 @@ fn remaining_ms(deadline: Instant) -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
+fn display_file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("<unknown>")
+        .to_string()
+}
+
+fn redact_manifest_arg(value: &str) -> String {
+    if value.contains('/') || value.contains('\\') || Path::new(value).is_absolute() {
+        Path::new(value)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| format!("<path:{name}>"))
+            .unwrap_or_else(|| "<path>".to_string())
+    } else {
+        value.to_string()
+    }
+}
+
+fn redact_env_key(value: &str) -> String {
+    let normalized = value.to_ascii_uppercase();
+    if [
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASS",
+        "KEY",
+        "CREDENTIAL",
+        "AUTH",
+        "COOKIE",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+    {
+        "<redacted-secret-env>".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1417,6 +1604,71 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETUR
         let err = discover_plugins(&dir).unwrap_err();
 
         assert!(err.to_string().contains("duplicate plugin id"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn inspect_plugin_manifests_is_best_effort_and_redacts_local_values() {
+        let dir = temp_dir("inspect-manifests");
+        let secret_dir = dir.join("private");
+        fs::create_dir(&secret_dir).unwrap();
+        let marker = dir.join("argv-was-executed");
+        let plugin = write_plugin(&secret_dir, "print('not executed')\n");
+        fs::write(
+            dir.join("valid.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": [python(), plugin, marker],
+                "env": {"API_TOKEN": "super-secret", "PLAIN": "visible"},
+                "working_dir": secret_dir
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("duplicate.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": ["python3", "plugin.py"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join("empty-argv.json"), r#"{"id":"empty","argv":[]}"#).unwrap();
+        fs::write(dir.join("broken.json"), "{").unwrap();
+
+        let inspections = inspect_plugin_manifests(&dir).unwrap();
+        let serialized = serde_json::to_string(&inspections).unwrap();
+
+        assert_eq!(inspections.len(), 4);
+        assert!(!serialized.contains("super-secret"));
+        assert!(!serialized.contains("visible"));
+        assert!(!serialized.contains("API_TOKEN"));
+        assert!(serialized.contains("<redacted-secret-env>"));
+        assert!(serialized.contains("PLAIN"));
+        assert!(!serialized.contains(secret_dir.to_string_lossy().as_ref()));
+        assert!(serialized.contains("<path:plugin.py>"));
+        assert!(!marker.exists());
+        let duplicate = inspections
+            .iter()
+            .filter(|inspection| inspection.id.as_deref() == Some("synthetic"))
+            .collect::<Vec<_>>();
+        assert_eq!(duplicate.len(), 2);
+        assert!(duplicate.iter().all(|inspection| {
+            inspection.status == PluginManifestStatus::Invalid
+                && inspection
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("duplicate plugin id"))
+        }));
+        assert!(inspections.iter().any(|inspection| inspection
+            .errors
+            .iter()
+            .any(|error| error.contains("argv is empty"))));
+        assert!(inspections.iter().any(|inspection| inspection
+            .errors
+            .iter()
+            .any(|error| error.contains("invalid json"))));
         fs::remove_dir_all(dir).unwrap();
     }
 

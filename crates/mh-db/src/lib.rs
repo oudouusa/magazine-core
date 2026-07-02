@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use mh_domain::{SourceRecord, ValidationError};
+use mh_domain::{ExternalLink, SourceRecord, ValidationError};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -115,6 +115,18 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Open an existing core DB read-only. Missing files are not created.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, DbError> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Err(DbError::MissingDatabase(path.to_path_buf()));
+        }
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        enable_foreign_keys(&conn)?;
+        ensure_openable_for_inspect(&conn, path)?;
+        Ok(Self { conn })
+    }
+
     /// Inspect an existing core DB read-only. Missing files are not created.
     pub fn inspect_path(path: impl AsRef<Path>) -> Result<DbInspection, DbError> {
         let path = path.as_ref();
@@ -143,6 +155,138 @@ impl Database {
             pages: table_count(&self.conn, "source_post_pages")?,
             external_links: table_count(&self.conn, "source_post_external_links")?,
         })
+    }
+
+    /// Return read-only UI summary counts.
+    pub fn ui_summary(&self) -> Result<UiSummary, DbError> {
+        Ok(UiSummary {
+            inspection: self.inspect()?,
+            sources: self.source_summaries()?,
+            known_source_urls: table_count(&self.conn, "source_posts")?,
+        })
+    }
+
+    /// Return per-source counts for the UI source overview.
+    pub fn source_summaries(&self) -> Result<Vec<SourceSummary>, DbError> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT source_name, COUNT(*) AS records, MAX(last_seen_at) AS last_seen_at
+            FROM source_posts
+            GROUP BY source_name
+            ORDER BY source_name
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SourceSummary {
+                source_name: row.get(0)?,
+                records: row.get(1)?,
+                last_seen_at: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+    }
+
+    /// Return a bounded page of source records with typed child rows.
+    pub fn source_record_page(&self, limit: u32, offset: u32) -> Result<SourceRecordPage, DbError> {
+        let limit = limit.clamp(1, 200);
+        let total = table_count(&self.conn, "source_posts")?;
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                id,
+                source_name,
+                source_url,
+                title,
+                brand_raw,
+                issue_no,
+                release_date,
+                post_date,
+                brand_normalized,
+                normalizer_id,
+                normalizer_version,
+                content_fingerprint,
+                extra_json,
+                first_seen_at,
+                last_seen_at,
+                updated_at
+            FROM source_posts
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?1 OFFSET ?2
+            "#,
+        )?;
+        let base_rows = stmt
+            .query_map(params![i64::from(limit), i64::from(offset)], |row| {
+                let extra_json: String = row.get(12)?;
+                Ok(SourceRecordView {
+                    id: row.get(0)?,
+                    source_name: row.get(1)?,
+                    source_url: row.get(2)?,
+                    title: row.get(3)?,
+                    brand_raw: row.get(4)?,
+                    issue_no: row.get(5)?,
+                    release_date: row.get(6)?,
+                    post_date: row.get(7)?,
+                    brand_normalized: row.get(8)?,
+                    normalizer_id: row.get(9)?,
+                    normalizer_version: row.get(10)?,
+                    content_fingerprint: row.get(11)?,
+                    extra: parse_json_object(&extra_json)?,
+                    first_seen_at: row.get(13)?,
+                    last_seen_at: row.get(14)?,
+                    updated_at: row.get(15)?,
+                    performers_raw: Vec::new(),
+                    cover_urls: Vec::new(),
+                    page_urls: Vec::new(),
+                    external_links: Vec::new(),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::Sqlite)?;
+
+        let mut records = Vec::with_capacity(base_rows.len());
+        for mut record in base_rows {
+            record.performers_raw = child_values(
+                &self.conn,
+                "source_post_performers",
+                "performer_raw",
+                record.id,
+            )?;
+            record.cover_urls =
+                child_values(&self.conn, "source_post_covers", "cover_url", record.id)?;
+            record.page_urls =
+                child_values(&self.conn, "source_post_pages", "page_url", record.id)?;
+            record.external_links = external_links(&self.conn, record.id)?;
+            records.push(record);
+        }
+
+        Ok(SourceRecordPage {
+            total,
+            limit,
+            offset,
+            records,
+        })
+    }
+
+    /// Return typed known-source-url state grouped by source.
+    pub fn known_source_url_state(
+        &self,
+        source_name: Option<&str>,
+    ) -> Result<Vec<KnownSourceUrls>, DbError> {
+        let sources = match source_name {
+            Some(source_name) => vec![source_name.to_string()],
+            None => self
+                .source_summaries()?
+                .into_iter()
+                .map(|source| source.source_name)
+                .collect(),
+        };
+        sources
+            .into_iter()
+            .map(|source_name| {
+                self.known_source_urls(&source_name)
+                    .map(|urls| KnownSourceUrls { source_name, urls })
+            })
+            .collect()
     }
 
     /// Return all known source URLs for a source, sorted for deterministic
@@ -250,6 +394,63 @@ pub struct DbInspection {
     pub covers: i64,
     pub pages: i64,
     pub external_links: i64,
+}
+
+/// Summary returned to the bundled read-only UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UiSummary {
+    pub inspection: DbInspection,
+    pub sources: Vec<SourceSummary>,
+    pub known_source_urls: i64,
+}
+
+/// Per-source count returned to the bundled read-only UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceSummary {
+    pub source_name: String,
+    pub records: i64,
+    pub last_seen_at: Option<String>,
+}
+
+/// Bounded source record page returned to the bundled read-only UI.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceRecordPage {
+    pub total: i64,
+    pub limit: u32,
+    pub offset: u32,
+    pub records: Vec<SourceRecordView>,
+}
+
+/// Source record row with typed child lists for UI browsing.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceRecordView {
+    pub id: i64,
+    pub source_name: String,
+    pub source_url: String,
+    pub title: String,
+    pub brand_raw: String,
+    pub issue_no: Option<String>,
+    pub release_date: Option<String>,
+    pub post_date: Option<String>,
+    pub brand_normalized: Option<String>,
+    pub normalizer_id: Option<String>,
+    pub normalizer_version: Option<String>,
+    pub content_fingerprint: Option<String>,
+    pub extra: serde_json::Map<String, Value>,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+    pub updated_at: String,
+    pub performers_raw: Vec<String>,
+    pub cover_urls: Vec<String>,
+    pub page_urls: Vec<String>,
+    pub external_links: Vec<ExternalLink>,
+}
+
+/// Typed state view for `known_source_urls`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KnownSourceUrls {
+    pub source_name: String,
+    pub urls: Vec<String>,
 }
 
 /// Lightweight state returned to plugins via typed `state_query`.
@@ -766,10 +967,51 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, DbError> {
     Ok(exists)
 }
 
+fn parse_json_object(raw: &str) -> Result<serde_json::Map<String, Value>, rusqlite::Error> {
+    serde_json::from_str(raw).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
+    })
+}
+
+fn child_values(
+    conn: &Connection,
+    table: &'static str,
+    value_column: &'static str,
+    source_post_id: i64,
+) -> Result<Vec<String>, DbError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {value_column} FROM {table} WHERE source_post_id = ?1 ORDER BY position"
+    ))?;
+    let rows = stmt.query_map(params![source_post_id], |row| row.get::<_, String>(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
+fn external_links(conn: &Connection, source_post_id: i64) -> Result<Vec<ExternalLink>, DbError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT url, provider, label, kind, external_id, metadata_json
+        FROM source_post_external_links
+        WHERE source_post_id = ?1
+        ORDER BY position
+        "#,
+    )?;
+    let rows = stmt.query_map(params![source_post_id], |row| {
+        let metadata_json: String = row.get(5)?;
+        Ok(ExternalLink {
+            url: row.get(0)?,
+            provider: row.get(1)?,
+            label: row.get(2)?,
+            kind: row.get(3)?,
+            external_id: row.get(4)?,
+            metadata: parse_json_object(&metadata_json)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::Sqlite)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mh_domain::ExternalLink;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1109,6 +1351,88 @@ mod tests {
             db.content_fingerprint("source-a", shared_url).unwrap(),
             db.content_fingerprint("source-b", shared_url).unwrap()
         );
+    }
+
+    #[test]
+    fn ui_summary_records_and_known_source_state_are_read_only() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        let mut first = record("synthetic://post/1");
+        first.extra.insert("rank".to_string(), json!(1));
+        first.external_links[0]
+            .metadata
+            .insert("sku".to_string(), json!("SKU-1"));
+        let mut second = record("synthetic://post/2");
+        second.source_name = "alternate".to_string();
+        db.ingest_records(&[first, second]).unwrap();
+        let before_inspect = db.inspect().unwrap();
+
+        let summary = db.ui_summary().unwrap();
+        assert_eq!(summary.inspection, before_inspect);
+        assert_eq!(summary.sources.len(), 2);
+        assert_eq!(summary.known_source_urls, 2);
+
+        let page = db.source_record_page(50, 0).unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.limit, 50);
+        assert_eq!(page.records.len(), 2);
+        let synthetic = page
+            .records
+            .iter()
+            .find(|record| record.source_name == "synthetic")
+            .unwrap();
+        assert_eq!(synthetic.performers_raw, vec!["Alice", "Bob"]);
+        assert_eq!(
+            synthetic.cover_urls,
+            vec![
+                "https://example.test/cover-1.jpg",
+                "https://example.test/cover-2.jpg"
+            ]
+        );
+        assert_eq!(
+            synthetic.page_urls,
+            vec!["https://example.test/page/1".to_string()]
+        );
+        assert_eq!(synthetic.external_links[0].metadata["sku"], json!("SKU-1"));
+        assert_eq!(synthetic.extra["rank"], json!(1));
+
+        let state = db.known_source_url_state(Some("synthetic")).unwrap();
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].source_name, "synthetic");
+        assert_eq!(state[0].urls, vec!["synthetic://post/1".to_string()]);
+        assert_eq!(db.inspect().unwrap(), before_inspect);
+    }
+
+    #[test]
+    fn open_read_only_does_not_create_files_or_allow_ingest() {
+        let missing = temp_db_path("readonly-missing");
+        assert!(matches!(
+            Database::open_read_only(&missing),
+            Err(DbError::MissingDatabase(_))
+        ));
+        assert!(!missing.exists());
+
+        let path = temp_db_path("readonly");
+        let mut writable = Database::open(&path).unwrap();
+        writable.initialize().unwrap();
+        writable
+            .ingest_records(&[record("synthetic://post/1")])
+            .unwrap();
+        drop(writable);
+        let before = fs::read(&path).unwrap();
+
+        let mut readonly = Database::open_read_only(&path).unwrap();
+        assert_eq!(readonly.inspect().unwrap().source_posts, 1);
+        assert!(readonly
+            .ingest_records(&[record("synthetic://post/2")])
+            .is_err());
+        drop(readonly);
+
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!path.with_extension("db-wal").exists());
+        assert!(!path.with_extension("db-shm").exists());
+        assert!(!path.with_extension("db-journal").exists());
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
