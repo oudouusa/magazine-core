@@ -5,6 +5,12 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Standalone quickstart docs and a release-consuming checker that verifies
+  linux-x86_64 GitHub Release artifacts can run `init-db`, synthetic
+  `discover`, and `inspect` without repo paths.
+
 ## [0.1.0-beta.2] - 2026-07-02
 
 ### Added

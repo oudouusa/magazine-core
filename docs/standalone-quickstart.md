@@ -1,0 +1,158 @@
+# Standalone quickstart
+
+This quickstart verifies the current standalone distribution shape: public
+GitHub Release artifacts alone can run `install -> init-db -> discover ->
+inspect` with a synthetic plugin. It does not require a source checkout after
+the assets are downloaded.
+
+Current published prebuilt host coverage is linux-x86_64. Other platforms can
+build from source until a matching host binary is published.
+
+## Fast verification
+
+From a magazine-core checkout, run the release-consuming checker:
+
+```bash
+RELEASE_TAG=0.1.0-beta.2 bash scripts/verify-standalone-quickstart.sh
+```
+
+The checker creates a temporary directory, downloads the Release assets,
+verifies `SHA256SUMS.txt`, installs the attached SDK wheel into a fresh virtual
+environment with `--no-index`, writes a synthetic plugin and manifest in the
+temporary directory, and asserts that `discover` ingests one record.
+
+The checker intentionally avoids `plugins.d/`, `examples/`, and
+`sdk/python/src` from this repository.
+
+## Manual artifact-only flow
+
+Create an empty workspace:
+
+```bash
+mkdir magazine-core-quickstart
+cd magazine-core-quickstart
+```
+
+Download the Release assets:
+
+```bash
+release_tag=0.1.0-beta.2
+base_url="https://github.com/oudouusa/magazine-core/releases/download/${release_tag}"
+
+curl -fsSLO "${base_url}/SHA256SUMS.txt"
+curl -fsSLO "${base_url}/magazine-core-mh-linux-x86_64.tar.gz"
+curl -fsSLO "${base_url}/magazine_core_plugin_sdk-0.1.0-py3-none-any.whl"
+curl -fsSLO "${base_url}/sbom.cyclonedx.json"
+sha256sum -c SHA256SUMS.txt
+```
+
+Extract the host binary and install the SDK wheel locally:
+
+```bash
+tar -xzf magazine-core-mh-linux-x86_64.tar.gz
+python3 -m venv .venv
+.venv/bin/python -m pip install --no-index --no-deps \
+  magazine_core_plugin_sdk-0.1.0-py3-none-any.whl
+./mh --help
+```
+
+Write a synthetic plugin:
+
+```bash
+cat > quickstart_plugin.py <<'PY'
+from __future__ import annotations
+
+from magazine_core_plugin_sdk import ExternalLink, SourceRecord, run_plugin
+
+
+def discover(context, _params):
+    context.log("info", "standalone quickstart discover")
+    context.send_record(
+        SourceRecord(
+            source_name="quickstart",
+            source_url="synthetic://quickstart/1",
+            title="Standalone Quickstart One",
+            brand_raw="Synthetic Brand",
+            performers_raw=["Alice Example"],
+            cover_urls=["https://example.invalid/cover.jpg"],
+            page_urls=["https://example.invalid/page/1"],
+            issue_no="1",
+            external_links=[
+                ExternalLink(
+                    url="https://example.invalid/retail/1",
+                    provider="example",
+                    label="Example Retail",
+                    kind="retail",
+                    external_id="retail-1",
+                    metadata={"fixture": "standalone-quickstart"},
+                )
+            ],
+            release_date="2026-07-02",
+            extra={"fixture": "standalone-quickstart"},
+        )
+    )
+
+
+if __name__ == "__main__":
+    run_plugin(
+        source_name="quickstart",
+        display_label="Standalone Quickstart",
+        discover=discover,
+        allowed_domains=["example.invalid"],
+        capabilities=["discover"],
+    )
+PY
+```
+
+Create a plugin manifest that uses the virtual environment Python directly:
+
+```bash
+mkdir -p plugins.d
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+work_dir = Path.cwd()
+manifest = {
+    "id": "quickstart",
+    "argv": [str(work_dir / ".venv/bin/python"), "quickstart_plugin.py"],
+    "working_dir": str(work_dir),
+}
+Path("plugins.d/quickstart.json").write_text(
+    json.dumps(manifest, indent=2) + "\n",
+    encoding="utf-8",
+)
+PY
+```
+
+Initialize a database, run discovery, and inspect the result:
+
+```bash
+./mh init-db scratch.db
+./mh discover scratch.db ./plugins.d quickstart \
+  --max-pages 1 \
+  --per-page 30 \
+  --max-records 30 \
+  --timeout-seconds 60
+./mh inspect scratch.db
+```
+
+The final `inspect` output should include one source post, one performer, one
+cover, one page, and one external link:
+
+```json
+{
+  "schema_version": 1,
+  "source_posts": 1,
+  "performers": 1,
+  "covers": 1,
+  "pages": 1,
+  "external_links": 1
+}
+```
+
+## Trust boundary
+
+Plugins are trusted executable code. The host isolates lifecycle and crashes,
+but it is not a sandbox. This quickstart uses only a synthetic local plugin and
+does not fetch external pages.
