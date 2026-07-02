@@ -39,6 +39,8 @@ Verify from a clean, unauthenticated clone:
 - [ ] Standalone synthetic quickstart consumes public Release artifacts only:
       `RELEASE_TAG=<version> bash scripts/verify-standalone-quickstart.sh`
       (or the `standalone cold-start` job from the release-tag workflow run).
+      For releases containing `mh ui`, this includes local read-only UI browse
+      and guarded `--manage` discover smoke.
 - [ ] Published asset SHA-256 values match `SHA256SUMS.txt`.
 
 ## Scope reminder

@@ -8,7 +8,7 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **`0.1.0-beta.1` として公開済み**（GitHub prerelease）。`protocol_version = 1` /
+- **`0.1.0-beta.2` として公開済み**（GitHub prerelease）。`protocol_version = 1` /
   `record_schema_version = 1` を beta として凍結し、以後の contract 変更は
   evidence-driven に扱う。
 - protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
@@ -43,7 +43,9 @@ paths:
 RELEASE_TAG=0.1.0-beta.2 bash scripts/verify-standalone-quickstart.sh
 ```
 
-See `docs/standalone-quickstart.md` for the manual artifact-only flow.
+See `docs/standalone-quickstart.md` for the manual artifact-only flow. Release
+binaries that include `mh ui` are also checked for local read-only browsing and
+guarded `--manage` discover in the same quickstart verifier.
 
 ## 開発
 
