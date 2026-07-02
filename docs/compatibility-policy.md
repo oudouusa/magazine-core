@@ -1,10 +1,10 @@
 # Compatibility policy
 
-This policy applies after a future `1.0.0` stable tag. It does not cut that tag
-and does not change the current beta contract.
+This policy applies to the `1.0.0` stable tag and later `1.x` releases. It does
+not by itself create a tag or GitHub Release; release execution is governed by
+`docs/release/public-visibility-checklist.md` and the per-release notes.
 
-`1.0.0` remains blocked by the release checklist until this policy and every
-other `1.0.0 Eligibility Gate` item have supporting evidence.
+The `1.0.0` eligibility evidence is collected in `docs/release/1.0.0.md`.
 
 ## Stable Surfaces
 

@@ -1,10 +1,11 @@
 # next implementation plan
 
-`magazine-core` is public as `0.1.0-beta.2` (GitHub Release with the Linux
-binary, canonical Python wheel, SBOM, and `SHA256SUMS.txt`).
-`protocol_version = 1` and `record_schema_version = 1` are frozen for the
-beta. Downstream adapter evidence has exercised the host-fetch and
-extension-heavy migration shapes this repo was designed to support:
+`magazine-core` is prepared for the `1.0.0` stable release (expected GitHub
+Release artifact set: Linux binary, canonical Python wheel, SBOM, and
+`SHA256SUMS.txt`). `protocol_version = 1` and `record_schema_version = 1` are
+the stable `1.x` contract identifiers. Downstream adapter evidence has
+exercised the host-fetch and extension-heavy migration shapes this repo was
+designed to support:
 
 ```text
 host-fetch + typed state + page metadata
@@ -84,17 +85,17 @@ code.
 
 ## Evidence-Driven Queue Status
 
-Current status as of 2026-07-02:
+Current status as of 2026-07-03:
 
-- release artifact consumption proof is complete through `0.1.0-beta.2`;
+- release artifact consumption proof is complete through `0.1.0-beta.3`;
   the GitHub Release contains the Linux binary, canonical Python wheel, SBOM,
-  and `SHA256SUMS.txt`, and downstream consumes the release-mode checksums.
-- downstream core-improvement intake is empty after closing hub-only private
+  and `SHA256SUMS.txt`, and public artifact UI smoke is verified by
+  `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`.
+- downstream core-improvement intake is empty after closing private-only
   manifest handling and accepted runtime DDL residual monitoring out of the
   core promotion queue.
 - GitHub open issues, open pull requests, and repository security advisories
-  were checked during the C4 current-window audit and no public support item
-  was pending.
+  are empty as of the 2026-07-03 stable release-prep owner check.
 
 Standing evidence-driven intake remains:
 
@@ -109,8 +110,9 @@ generic gap.
 Current bounded work has completed the maintainer-approved standalone
 distribution and admin/viewer UI product scope without changing
 `protocol_version`, `record_schema_version`, the Python SDK root API, or the
-canonical DB schema. The next priority is formal stable-tag criteria, not a
-`1.0.0` tag:
+canonical DB schema. The next priority is S4 release execution: create the
+`1.0.0` tag and GitHub Release at the exact release-prep commit, then dispatch
+release hardening:
 
 1. Completed in the current standalone quickstart slice: documented and
    verified a linux-x86_64 quickstart where public Release artifacts alone run
@@ -171,6 +173,12 @@ canonical DB schema. The next priority is formal stable-tag criteria, not a
     the UI smoke path yet, and failing `1.0.0` version discipline because
     package metadata, changelog, release notes, and tag agreement are not
     prepared.
+13. Completed in the S3 stable release-prep slice:
+    `docs/development/1-0-stability-window-evidence-2026-07-03.md` identifies
+    the stability window by commit range, `docs/release/1.0.0.md` aggregates
+    the eligibility-gate evidence, and package metadata / changelog / release
+    notes now agree on `1.0.0`. S3 intentionally creates no tag, GitHub
+    Release, or push.
 
 ## Maintainer Product Scope (contract-neutral)
 
@@ -191,8 +199,9 @@ Python SDK root API, or the canonical DB schema:
 
 The formal gate is `docs/release/public-visibility-checklist.md` section
 `1.0.0 Eligibility Gate`. Cut `1.0.0` only after every item in that gate is
-true and the release notes link the supporting evidence. At a minimum this
-requires:
+true and the release notes link the supporting evidence. For the S3
+release-prep branch, the gate evidence is collected in `docs/release/1.0.0.md`;
+S4 must still create the tag and GitHub Release. At a minimum this requires:
 
 - a beta window with zero contract changes
 - release artifact consumption working downstream
@@ -202,8 +211,9 @@ requires:
 - a documented post-`1.0.0` compatibility policy
 - version metadata, changelog, release notes, and GitHub Release tag agreement
 
-Current decision: do not cut `1.0.0` on 2026-07-02. See
-`docs/development/1-0-stable-tag-decision-2026-07-02.md`.
+Current decision: S3 prepares the `1.0.0` release commit only. S4 is
+responsible for tag creation, GitHub Release creation with `target_commitish`
+set to the exact commit SHA, and release-hardening dispatch.
 
 ## Core Follow-Up Policy
 

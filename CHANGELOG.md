@@ -5,6 +5,25 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-03
+
+### Stable
+
+- Promoted release metadata to `1.0.0` across Cargo packages, `Cargo.lock`,
+  and the Python SDK project metadata (`1.0.0` under PEP 440).
+- Recorded the `1.0.0` stability-window evidence: from `0.1.0-beta.2` through
+  the release-prep base, the protocol source, Python SDK source, conformance
+  fixtures, and canonical SQLite schema contract stayed unchanged.
+- Added the `1.0.0` release notes that aggregate the public eligibility-gate
+  evidence for the stability window, public artifact smoke, standalone
+  cold-start, conformance, compatibility policy, and version discipline.
+
+### Documentation
+
+- Updated active release-facing docs for the stable `1.x` compatibility policy
+  and release-prep status. There are no protocol, SDK root API, canonical schema,
+  or conformance fixture changes from `0.1.0-beta.3`.
+
 ## [0.1.0-beta.3] - 2026-07-03
 
 ### Added
@@ -115,6 +134,7 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[1.0.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.0.0
 [0.1.0-beta.3]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.1
