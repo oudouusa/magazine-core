@@ -34,7 +34,8 @@ Verify from a clean, unauthenticated clone:
 - [ ] `git clone` works anonymously; README, Actions, tags, and the Release render.
 - [ ] `cargo build --release -p mh-cli --locked` succeeds.
 - [ ] `pip install` the released wheel into a fresh venv; `import magazine_core_plugin_sdk`.
-- [ ] Synthetic quickstart: `mh init-db` / `mh inspect` / `mh discover ... example`.
+- [ ] Standalone synthetic quickstart consumes public Release artifacts only:
+      `RELEASE_TAG=<version> bash scripts/verify-standalone-quickstart.sh`.
 - [ ] Published asset SHA-256 values match `SHA256SUMS.txt`.
 
 ## Scope reminder

@@ -34,6 +34,17 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
 - 1.0 安定化は protocol / SDK の beta 運用を経てから判断する。
 
+## Standalone quickstart
+
+The published linux-x86_64 Release artifacts can be verified without using repo
+paths:
+
+```bash
+RELEASE_TAG=0.1.0-beta.2 bash scripts/verify-standalone-quickstart.sh
+```
+
+See `docs/standalone-quickstart.md` for the manual artifact-only flow.
+
 ## 開発
 
 ```bash

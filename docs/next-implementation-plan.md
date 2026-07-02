@@ -109,7 +109,8 @@ Next bounded work starts the maintainer-approved product scope without changing
 `protocol_version`, `record_schema_version`, the Python SDK root API, or the
 canonical DB schema:
 
-1. Document and verify a quickstart where public release artifacts alone can run
+1. Completed in the current standalone quickstart slice: documented and
+   verified a linux-x86_64 quickstart where public Release artifacts alone run
    install -> `init-db` -> synthetic example `discover` -> `inspect`.
 2. Record the distribution-channel decision. GitHub Release artifacts remain
    the source of truth; `cargo install`, PyPI, and Docker are evaluated only if
