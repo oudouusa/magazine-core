@@ -18,6 +18,33 @@ The framework **does** own generic safety as first-class behaviour:
 - plugins are trusted executable code; process separation isolates crashes and
   lifecycle, not authority. Untrusted-plugin sandboxing is out of scope.
 
+## Local UI trust model
+
+`mh ui` is a local operator tool served by the CLI host. The default C6 viewer
+is intentionally narrow:
+
+- binds to `127.0.0.1` only;
+- stays read-only;
+- exposes no management endpoints;
+- uses no authentication for default read-only browsing under the local
+  loopback trust model;
+- accepts only `GET` and `HEAD` routes in the read-only slice;
+- does not emit permissive CORS headers;
+- lists `plugins.d` manifests without executing plugin commands, and redacts
+  local path arguments and secret-like environment metadata.
+
+Do not expose `mh ui` through a public interface, tunnel, reverse proxy, or
+shared remote host unless a separate security-boundary change defines and
+implements an explicit remote-access model. Loopback binding and read-only
+browsing are the security assumptions for the default UI.
+
+Future mutating UI operations must require an explicit management-mode process
+opt-in, but that opt-in is not sufficient by itself. Before any mutation or
+local process-control route runs, the route must also require an unguessable
+per-process local token or equivalent CSRF-resistant request guard, reject
+state-changing `GET` requests, and validate the loopback `Host` and `Origin`
+assumptions documented by the admin/viewer UI ADR.
+
 Do not use this framework to access third-party sites without authorisation or
 in violation of their terms; ToS/legal compliance is the operator's
 responsibility.
