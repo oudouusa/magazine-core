@@ -30,7 +30,7 @@ message loop を実行する。site-specific adapter や proxy/cookie/challenge 
    `record_schema_version = 1` を検証する。
 3. host→plugin `discover` request を送り、応答待ち中に plugin→host の message を処理する。
 4. `record` notification は `SourceRecord` として検証し、memory spool に追加する。
-5. CLI `mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N]` は canonical DB を先に
+5. CLI `mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]` は canonical DB を先に
    open/init し、read-only state provider と指定された discover limits を渡して discovery を走らせる。
 6. plugin が clean exit した後、spool を単一 DB transaction で ingest する。
 
@@ -66,7 +66,9 @@ host は plugin が守る `limits.max_records` とは別に、常に次の絶対
 
 ## lifecycle
 
-stdout frame read は別スレッドに分離し、main loop が deadline を管理する。timeout 時は Unix で
+stdout frame read は別スレッドに分離し、main loop が deadline を管理する。CLI の
+既定 discover deadline は 60 秒で、operator は `--timeout-seconds N` で正の秒数を
+明示できる。host は同じ deadline から plugin へ `remaining_ms` を渡す。timeout 時は Unix で
 plugin を新 session/process group として起動しているため、process group に `SIGTERM`、
 grace 後に `SIGKILL` を送る。これにより plugin の子孫プロセスも残さない。
 

@@ -48,6 +48,9 @@ Post-release on the current repo:
 - AGENTS.md redesign for post-beta evidence-driven development (#5)
 - Python SDK batched record emission over the existing protocol v1 `records`
   notification shape, with host regressions and a pinned conformance fixture
+- CLI-configurable discover timeout budget with public-safe synthetic coverage,
+  reusing the existing protocol v1 `remaining_ms` field and keeping timeout
+  failures fail-closed
 
 ## Protocol v1 Audit Result
 
@@ -79,14 +82,11 @@ code.
 Ordered by downstream evidence; each item lands as a small PR set with
 synthetic tests and public-safe docs:
 
-1. **Bounded plugin runtime limits** — implement only if a synthetic plugin
-   reproduces a generic runtime-limit gap; otherwise this stays a downstream
-   concern.
-2. **Release artifact automation** — attach hardened binaries / wheels /
+1. **Release artifact automation** — attach hardened binaries / wheels /
    checksums / SBOM to GitHub Releases so downstream consumers can verify and
    consume by version/checksum without a local checkout.
-3. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
-4. **Python SDK ergonomics** only when real wrappers need them.
+2. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
+3. **Python SDK ergonomics** only when real wrappers need them.
 
 ## Maintainer Product Scope (contract-neutral)
 
