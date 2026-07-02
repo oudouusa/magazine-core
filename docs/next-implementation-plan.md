@@ -146,9 +146,13 @@ canonical DB schema:
    `GET` rejection, loopback `Host` / `Origin` validation, guarded `init-db`,
    policy-capped bounded `discover`, single active UI-started run tracking,
    and cancellation for that UI-started run.
-9. Next: integrate the UI into release artifact / quickstart / conformance
-   smoke so a public binary can prove synthetic DB browsing and guarded
-   management-mode discover without a repo checkout.
+9. Completed in the current UI release-smoke slice:
+   `docs/development/admin-viewer-ui-release-smoke-evidence-2026-07-02.md`
+   records artifact-only quickstart coverage for local read-only UI browse and
+   guarded `--manage` discover. Release hardening now forces the UI smoke for
+   freshly generated Linux artifacts while `VERIFY_UI=auto` keeps older
+   pre-UI tags consumable.
+10. Next: formalize 1.0 criteria in public docs before any `1.0.0` tag.
 
 ## Maintainer Product Scope (contract-neutral)
 

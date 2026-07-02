@@ -361,6 +361,15 @@ fi
 binary_sha="$(awk -v file="${binary_package}" '{path=$2; sub(/^\.\//, "", path); if (path == file) print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
 python_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path ~ /^magazine_core_plugin_sdk-.*\.whl$/) print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
 sbom_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path == "sbom.cyclonedx.json") print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
+artifact_quickstart_status="skipped (${platform_slug})"
+if [[ "${platform_slug}" == "linux-x86_64" ]]; then
+  run env \
+    RELEASE_TAG="${release_ref}" \
+    RELEASE_BASE_URL="file://${ARTIFACT_DIR}" \
+    VERIFY_UI=1 \
+    bash "${ROOT}/scripts/verify-standalone-quickstart.sh"
+  artifact_quickstart_status="pass"
+fi
 finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 cat > "${REPORT}" <<EOF
@@ -395,6 +404,7 @@ cat > "${REPORT}" <<EOF
 - binary package (${binary_package}): pass
 - Python SDK wheel package: pass
 - Python SDK wheel install smoke: pass
+- release artifact quickstart + UI smoke: ${artifact_quickstart_status}
 - CycloneDX SBOM generation: pass
 - worktree common secret-pattern scan: pass
 - git history common secret-pattern scan: pass

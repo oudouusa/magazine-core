@@ -2,8 +2,10 @@
 
 This quickstart verifies the current standalone distribution shape: public
 GitHub Release artifacts alone can run `install -> init-db -> discover ->
-inspect` with a synthetic plugin. It does not require a source checkout after
-the assets are downloaded.
+inspect` with a synthetic plugin. For releases whose `./mh --help` advertises
+`mh ui`, the same artifact-only flow can also browse the scratch DB locally, and
+the automated checker proves guarded `--manage` discover from the released
+binary. It does not require a source checkout after the assets are downloaded.
 
 Current published prebuilt host coverage is linux-x86_64. Other platforms can
 build from source until a matching host binary is published.
@@ -25,7 +27,10 @@ RELEASE_TAG=0.1.0-beta.2 bash scripts/verify-standalone-quickstart.sh
 The checker creates a temporary directory, downloads the Release assets,
 verifies `SHA256SUMS.txt`, installs the attached SDK wheel into a fresh virtual
 environment with `--no-index`, writes a synthetic plugin and manifest in the
-temporary directory, and asserts that `discover` ingests one record.
+temporary directory, and asserts that `discover` ingests one record. When the
+release binary advertises `mh ui`, the checker starts the local UI in read-only
+mode and management mode, then verifies DB browsing, method rejection, token
+guarding, bounded discover rejection, and a guarded management discover.
 
 The checker intentionally avoids `plugins.d/`, `examples/`, and
 `sdk/python/src` from this repository.
@@ -157,8 +162,27 @@ cover, one page, and one external link:
 }
 ```
 
+If `./mh --help` advertises `mh ui`, browse the scratch DB with the bundled
+local UI:
+
+```bash
+./mh ui --db scratch.db --plugins-dir ./plugins.d --port 8765
+```
+
+Open `http://127.0.0.1:8765` from the same machine. The default UI is read-only.
+For an opt-in local management session, restart it with:
+
+```bash
+./mh ui --db scratch.db --plugins-dir ./plugins.d --port 8765 --manage
+```
+
+The browser UI uses a per-process local token for management requests. The
+automated checker covers the token-guarded `init-db` / bounded `discover` /
+cancel surface so the manual quickstart does not require copying tokens.
+
 ## Trust boundary
 
 Plugins are trusted executable code. The host isolates lifecycle and crashes,
-but it is not a sandbox. This quickstart uses only a synthetic local plugin and
-does not fetch external pages.
+but it is not a sandbox. The UI binds to `127.0.0.1`; do not expose it through a
+public interface, tunnel, reverse proxy, or shared remote host. This quickstart
+uses only a synthetic local plugin and does not fetch external pages.

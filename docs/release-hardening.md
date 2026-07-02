@@ -28,6 +28,10 @@ The script performs:
   shapes.
 - SHA256 generation for release artifacts (`checksums.sha256` and the public
   release asset name `SHA256SUMS.txt`).
+- Linux release artifact quickstart with local UI smoke. The checker consumes
+  the freshly generated tarball, wheel, and `SHA256SUMS.txt` through the same
+  artifact path used by public cold-start verification, then proves read-only
+  UI browsing and guarded `--manage` discover.
 - Version discipline check for Cargo package versions, the Python SDK project
   metadata that determines wheel versioning, and release tag / changelog /
   release-note agreement when a version tag is provided.
@@ -65,7 +69,10 @@ cold-start job against the public GitHub Release URL. That job executes
 `scripts/verify-standalone-quickstart.sh` with `RELEASE_TAG=<tag>`, downloads
 the just-published public artifacts into a temporary directory, verifies
 `SHA256SUMS.txt`, installs the wheel with `--no-index --no-deps`, and proves
-`init-db -> discover -> inspect` with the synthetic quickstart plugin.
+`init-db -> discover -> inspect` with the synthetic quickstart plugin. For
+releases whose binary advertises `mh ui`, the same checker also proves local
+read-only UI browse, management disabled in default mode, token/method/bounds
+guards in `--manage` mode, and a guarded management discover.
 
 When `release_tag` looks like a release version such as `0.1.0-beta.3`,
 release hardening also requires all Cargo packages, the Python SDK version
