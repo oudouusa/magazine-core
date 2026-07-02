@@ -205,49 +205,24 @@ release / packaging / checksum に触れる変更は full loop 対象。
 4. downstream は自身の lock file で新 tag / SHA を pin して再検証する。
    core 側から downstream を操作しない（一方向依存）。
 
-## 7. 現状（2026-07 時点）
+## 7. 現状と次のタスク（正本ポインタ）
 
-- `0.1.0-beta.1` public prerelease 済み。protocol foundation / domain / DB / CLI /
-  plugin host runtime / typed `external_links` / Python SDK（root plugin-author API
-  凍結）/ DB-backed typed state / safe host fetch broker / conformance fixture
-  inventory / release hardening まで実装済み。
-- downstream evidence（host-fetch、multi-stage discovery、extension parity）に
-  よる protocol v1 audit 済み。契約の semantic 変更は不要と判断。generic gap と
-  して CLI-driven optional discover limits（`max_pages` / `max_records` /
-  `per_page`）を追加済み。conformance fixtures は typed state、discover limits、
-  non-empty `page_urls` を cover する。
-- plugin の速やかな shutdown を host が許容する fix 済み（browser-backed plugin
-  が子孫プロセスを閉じる短い grace。終了しない plugin は引き続き bounded に
-  fail-closed）。
+ロードマップの現在地・完了済み範囲・次の front は、このファイルに**複製しない**。
+複製された状態記述は実装より遅れて drift する（2026-07-02 の監査で、リリースと
+機能が 1 世代進んだ後も旧記述が残る drift を検出した教訓）。
 
-## 8. 次のタスク（evidence 順）
+- **現在の public release / 実装済み範囲**: `README.md` のステータス節と
+  GitHub Releases が正本。
+- **開発 front と evidence queue**: `docs/next-implementation-plan.md` が正本
+  （public status が変わる slice ごとに更新される）。
+- maintainer-approved product scope（単独配布・管理閲覧 UI）の現在地も
+  `docs/next-implementation-plan.md` の該当節を正本とする。
 
-ロードマップ順に小さな PR で進める。各 PR はブランチを切る（main へ直接 commit
-しない・infra を除く）。
+変わらない運用だけをここに置く: ロードマップ順に小さな PR で進める。各 PR は
+ブランチを切る（main へ直接 commit しない・infra を除く）。contract 変更は
+§2 の evidence-driven ルールに従う。
 
-1. **batched record emission** — downstream evidence 済みの最初の generic gap 候補。
-   one-frame-per-record emission が host queue / runtime limit に当たる圧力への
-   対応。protocol v1 内の additive optional capability を優先し、SDK-level batching
-   か host queue 挙動かは synthetic 再現で決める。
-2. **bounded plugin runtime limits** — synthetic plugin で generic な runtime limit
-   gap を再現できた場合のみ実装する。再現できなければ downstream 責務のまま。
-3. **release artifact 自動化** — release-hardening 出力（binary / wheel /
-   checksums / SBOM）を GitHub Release に自動添付し、downstream が checksum 検証で
-   消費できるようにする。
-4. downstream で実証された edge case の conformance fixture 追加（実データ持ち込み
-   禁止・synthetic 化必須）。
-5. SDK ergonomics は実 wrapper が必要とした API のみ追加する。
-6. **単独配布可能性**（maintainer decision 2026-07）— public release artifact
-   のみで install -> `init-db` -> synthetic example `discover` -> `inspect` が
-   完結する self-contained 配布。quickstart docs とクリーン環境での cold-start
-   検証を含む。
-7. **管理閲覧 UI**（maintainer decision 2026-07）— 同梱の generic local web UI。
-   `127.0.0.1` bind 既定、read-only 既定（mutating op は明示 opt-in flag）、
-   runtime Node 依存なし、protocol contract 非侵食。ADR で形態と管理範囲を
-   決めてから実装する。
-8. **1.0 基準の明文化**と、充足時の `1.0.0` 判断（単独配布と UI の完了を含む）。
-
-## 9. コミット / PR 規約
+## 8. コミット / PR 規約
 
 - ブランチ命名: `feat/...` / `fix/...` / `docs/...` / `chore/...`。
 - 小さな PR・1 commit 1 論理変更・push 前に検証 green。
