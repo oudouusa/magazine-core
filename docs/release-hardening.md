@@ -88,7 +88,7 @@ Historical beta releases that intentionally documented metadata drift, such as
 but rerunning publish hardening for that tag is intentionally blocked until the
 tag, packages, changelog, and release notes agree.
 
-For the beta line, these GitHub Release assets are the authoritative
+For the stable line, these GitHub Release assets are the authoritative
 distribution channel. `cargo install`, PyPI, and Docker are deferred channels
 until their release cost, trust boundary, and version discipline are explicitly
 accepted; see `docs/development/distribution-channel-decision-2026-07-02.md`.

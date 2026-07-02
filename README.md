@@ -8,9 +8,10 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **`0.1.0-beta.2` として公開済み**（GitHub prerelease）。`protocol_version = 1` /
-  `record_schema_version = 1` を beta として凍結し、以後の contract 変更は
-  evidence-driven に扱う。
+- **`1.0.0` stable release prep**。S3 では tag / GitHub Release / push を作成せず、
+  `protocol_version = 1` / `record_schema_version = 1` を stable `1.x`
+  contract とする release commit を準備する。S4 で exact commit SHA に tag /
+  Release を作成する。
 - protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
   parity の検証後、generic な discover limit gap として CLI-driven
   `max_pages` / `max_records` / `per_page` を protocol v1 の optional limits に追加済み。
@@ -32,17 +33,16 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 ## 今後
 
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
-- 1.0 安定化は protocol / SDK の beta 運用を経てから判断する。`1.0.0`
-  tag は `docs/release/public-visibility-checklist.md` の 1.0 eligibility
-  gate を満たすまで切らない。
+- stable tag / Release の作成は `docs/release/1.0.0.md` と
+  `docs/release/public-visibility-checklist.md` の evidence gate に従う。
 
 ## Standalone quickstart
 
-The published linux-x86_64 Release artifacts can be verified without using repo
-paths:
+The currently published linux-x86_64 beta Release artifacts can be verified
+without using repo paths. After S4 publishes `1.0.0`, use `RELEASE_TAG=1.0.0`.
 
 ```bash
-RELEASE_TAG=0.1.0-beta.2 bash scripts/verify-standalone-quickstart.sh
+RELEASE_TAG=0.1.0-beta.3 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
 ```
 
 See `docs/standalone-quickstart.md` for the manual artifact-only flow. Release
