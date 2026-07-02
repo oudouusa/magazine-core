@@ -118,7 +118,9 @@ canonical DB schema:
 3. Completed in the current version-discipline slice: release hardening checks
    Cargo package versions, Python SDK project metadata, and release tag /
    changelog / release-note agreement for version tags.
-4. Add a cold-start check in a clean environment or CI.
+4. Completed in the current cold-start slice: release-tag hardening dispatches
+   run a Linux standalone cold-start job after publishing public GitHub Release
+   assets, using only the Release URL, checksum file, binary tarball, and wheel.
 
 ## Maintainer Product Scope (contract-neutral)
 

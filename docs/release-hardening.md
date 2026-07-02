@@ -60,6 +60,13 @@ The publish step verifies the checksum file and refuses to upload if the
 Release target commit differs from the checked-out commit. Leave `release_tag`
 empty for hardening-only runs.
 
+For release-tag dispatches, the workflow then runs a Linux standalone
+cold-start job against the public GitHub Release URL. That job executes
+`scripts/verify-standalone-quickstart.sh` with `RELEASE_TAG=<tag>`, downloads
+the just-published public artifacts into a temporary directory, verifies
+`SHA256SUMS.txt`, installs the wheel with `--no-index --no-deps`, and proves
+`init-db -> discover -> inspect` with the synthetic quickstart plugin.
+
 When `release_tag` looks like a release version such as `0.1.0-beta.3`,
 release hardening also requires all Cargo packages, the Python SDK version
 source from `sdk/python/pyproject.toml` after PEP 440 normalization,

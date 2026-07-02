@@ -12,7 +12,9 @@ gates and verification steps without any deployment-specific operational detail.
 - [ ] Release hardening is green on supported platforms
       (`bash scripts/release-hardening.sh`, or the manual `Release hardening`
       workflow): fmt, clippy, `cargo test`, SDK pytest, CLI smoke, binary build,
-      wheel build + install smoke, SBOM, license inventory, secret scan.
+      wheel build + install smoke, SBOM, license inventory, secret scan. When
+      the workflow is dispatched with `release_tag`, the publish path must also
+      pass the standalone cold-start job against the public GitHub Release URL.
 - [ ] Secret scan (worktree + full git history) returns zero matches.
 - [ ] Examples are synthetic only; no captured site data, credentials, or
       private paths/hostnames anywhere in the tree or history.
@@ -35,7 +37,8 @@ Verify from a clean, unauthenticated clone:
 - [ ] `cargo build --release -p mh-cli --locked` succeeds.
 - [ ] `pip install` the released wheel into a fresh venv; `import magazine_core_plugin_sdk`.
 - [ ] Standalone synthetic quickstart consumes public Release artifacts only:
-      `RELEASE_TAG=<version> bash scripts/verify-standalone-quickstart.sh`.
+      `RELEASE_TAG=<version> bash scripts/verify-standalone-quickstart.sh`
+      (or the `standalone cold-start` job from the release-tag workflow run).
 - [ ] Published asset SHA-256 values match `SHA256SUMS.txt`.
 
 ## Scope reminder
