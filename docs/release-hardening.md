@@ -1,8 +1,10 @@
 # release hardening
 
-Run release hardening before cutting a beta tag or downstream beta-candidate
-SHA. The script is intentionally self-contained so a downstream lock update can
-cite artifact checksums from a repeatable command.
+Run release hardening before cutting a release tag or downstream candidate SHA.
+For a stable `1.0.0` tag, complete the 1.0 eligibility gate in
+`docs/release/public-visibility-checklist.md` first. The script is intentionally
+self-contained so a downstream lock update can cite artifact checksums from a
+repeatable command.
 
 ```bash
 bash scripts/release-hardening.sh
@@ -40,12 +42,12 @@ The script performs:
 `dist/` is ignored because the generated artifacts are release outputs, not
 source files. Commit the script and docs, run the script from a clean main
 checkout, and then record the resulting checksums in the downstream lock or
-release notes for the exact beta tag/SHA.
+release notes for the exact release tag/SHA.
 
-For repeatable pre-beta evidence, run the manual `Release hardening` workflow.
-It executes the same script on Ubuntu and macOS and uploads the report, binary
-tarball, Python wheel, CycloneDX SBOM, checksum file, dependency inventory,
-license inventory, and secret scan output.
+For repeatable pre-release evidence, run the manual `Release hardening`
+workflow. It executes the same script on Ubuntu and macOS and uploads the
+report, binary tarball, Python wheel, CycloneDX SBOM, checksum file,
+dependency inventory, license inventory, and secret scan output.
 It also uploads `version-discipline.json`, which records the package version
 and whether a version tag was compared.
 

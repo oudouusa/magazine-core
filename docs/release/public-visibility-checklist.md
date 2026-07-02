@@ -21,6 +21,40 @@ gates and verification steps without any deployment-specific operational detail.
 - [ ] Community files present: `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`,
       `CODE_OF_CONDUCT.md`, issue templates, PR template.
 
+## 1.0.0 Eligibility Gate
+
+Do not cut a `1.0.0` tag until every item in this section is true and the
+release notes link the supporting evidence. A prerelease or beta tag may ship
+with fewer guarantees, but it must not claim stable status.
+
+- [ ] A beta stability window is identified by tag or commit range, and that
+      window has zero changes to `protocol_version`, `record_schema_version`,
+      the Python SDK root plugin-author API, or the canonical SQLite schema.
+- [ ] The downstream-consuming release artifact path is proven from public
+      GitHub Release assets, not a dirty local checkout: binary tarball, Python
+      SDK wheel, `SHA256SUMS.txt`, SBOM, and standalone quickstart all verify.
+- [ ] The evidence-driven queue is empty: no accepted generic gap note,
+      contract-change PR, public support issue, open PR, or security advisory
+      is blocking the stable tag.
+- [ ] Protocol, plugin host, Python SDK, release hardening, standalone
+      quickstart, and migration/adoption docs describe the same stable
+      contract and have no unresolved `1.0` placeholder language.
+- [ ] Conformance fixtures are complete for the stable surface and
+      `bash conformance/check_golden.sh` passes without fixture drift.
+- [ ] The standalone distribution goal is met: a clean user can install from
+      Release artifacts and run `init-db -> discover -> inspect` with the
+      synthetic quickstart plugin.
+- [ ] The admin/viewer UI goal is met: a packaged `mh ui` can browse the
+      synthetic DB locally, default management is disabled, `--manage` is
+      guarded, and release hardening covers the UI smoke for UI-capable
+      artifacts.
+- [ ] Post-`1.0.0` compatibility policy is documented before tagging,
+      including how additive changes, deprecations, and compatibility windows
+      are handled.
+- [ ] Version discipline is green for `1.0.0`: Cargo package metadata, Python
+      SDK project metadata, `CHANGELOG.md`, `docs/release/1.0.0.md`, and the
+      GitHub Release tag agree.
+
 ## Cut the release
 
 - [ ] Update `CHANGELOG.md` and `docs/release/<version>.md`.

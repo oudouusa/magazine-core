@@ -36,3 +36,12 @@ Conformance inventory evidence is tracked in `docs/conformance-fixture-inventory
 
 チェック項目が未完了の間は、downstream lock は alpha SHA または明示的な beta-candidate SHA に
 留め、`0.1.0-beta` 完了とは扱わない。
+
+## stable / 1.0 readiness
+
+`1.0.0` readiness is not a downstream adapter checklist. It is a release gate
+for the public upstream and is tracked in
+`docs/release/public-visibility-checklist.md` section `1.0.0 Eligibility Gate`.
+Downstream lock updates after a stable tag still follow the same deliberate
+pinning rules and must state whether `protocol_version` or
+`record_schema_version` changed.

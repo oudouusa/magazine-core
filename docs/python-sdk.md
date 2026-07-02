@@ -1,6 +1,7 @@
 # Python SDK public API
 
-This document defines the Python SDK API tier for `0.1.0-beta`.
+This document defines the Python SDK API tier for `protocol_version = 1` and
+`record_schema_version = 1`.
 
 The SDK is a convenience layer for writing trusted plugins that speak
 `protocol_version = 1` over framed stdin/stdout. It does not change the wire
