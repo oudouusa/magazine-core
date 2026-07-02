@@ -1,6 +1,7 @@
 # next implementation plan
 
-`magazine-core` is public as `0.1.0-beta.1` (GitHub prerelease).
+`magazine-core` is public as `0.1.0-beta.2` (GitHub Release with the Linux
+binary, canonical Python wheel, SBOM, and `SHA256SUMS.txt`).
 `protocol_version = 1` and `record_schema_version = 1` are frozen for the
 beta. Downstream adapter evidence has exercised the host-fetch and
 extension-heavy migration shapes this repo was designed to support:
