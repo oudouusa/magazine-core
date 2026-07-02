@@ -5,8 +5,19 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-07-03
+
 ### Added
 
+- Local `mh ui` read-only admin/viewer mode for inspecting summary counts,
+  source records, typed state, and redacted plugin manifests from a core DB.
+- Explicit `mh ui --manage` mode with request-level token protection,
+  state-changing method guards, loopback request validation, bounded
+  `init-db` / `discover`, single-run tracking, and cancellation for
+  UI-started runs.
+- Artifact-only standalone quickstart verification for UI-capable releases,
+  covering local read-only browse and guarded management discover from the
+  downloaded public binary and SDK wheel.
 - Standalone quickstart docs and a release-consuming checker that verifies
   linux-x86_64 GitHub Release artifacts can run `init-db`, synthetic
   `discover`, and `inspect` without repo paths.
@@ -19,6 +30,18 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Release-tag hardening dispatches now run a standalone cold-start job after
   publishing Linux assets, verifying public GitHub Release artifacts with the
   artifact-only quickstart checker.
+
+### Documentation
+
+- Added the local UI ADR, read-only UI evidence, security trust model, and
+  management-mode evidence while keeping the UI outside the protocol and SDK
+  root API contracts.
+- Formalized the `1.0.0` eligibility gate, including the still-open need for a
+  public beta artifact containing the UI smoke path.
+- Documented the post-`1.0.0` compatibility policy for stable `1.x` surfaces,
+  additive changes, deprecations, breaking changes, and security exceptions.
+- Recorded the decision not to cut `1.0.0` yet because the current-surface beta
+  stability window and UI-bearing public artifact evidence are not complete.
 
 ## [0.1.0-beta.2] - 2026-07-02
 
@@ -92,5 +115,6 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[0.1.0-beta.3]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.1
