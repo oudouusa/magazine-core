@@ -51,6 +51,10 @@ Post-release on the current repo:
 - CLI-configurable discover timeout budget with public-safe synthetic coverage,
   reusing the existing protocol v1 `remaining_ms` field and keeping timeout
   failures fail-closed
+- Release hardening now emits public `SHA256SUMS.txt` checksums and the manual
+  workflow can publish the Linux binary, canonical Python wheel, SBOM, and
+  checksums to an existing GitHub Release after verifying the release target
+  commit.
 
 ## Protocol v1 Audit Result
 
@@ -82,9 +86,9 @@ code.
 Ordered by downstream evidence; each item lands as a small PR set with
 synthetic tests and public-safe docs:
 
-1. **Release artifact automation** — attach hardened binaries / wheels /
-   checksums / SBOM to GitHub Releases so downstream consumers can verify and
-   consume by version/checksum without a local checkout.
+1. **Release artifact consumption proof** — cut or select the next beta Release
+   for the current main commit, run the release publish workflow, and let
+   downstream flip its lock to release-mode checksums in a standalone PR.
 2. **Conformance fixtures** for downstream-proven edge cases, synthetic only.
 3. **Python SDK ergonomics** only when real wrappers need them.
 

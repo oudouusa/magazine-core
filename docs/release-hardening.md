@@ -26,7 +26,8 @@ The script performs:
   workspace crates.
 - Worktree and git-history secret-pattern scans for common token/private-key
   shapes.
-- SHA256 generation for release artifacts.
+- SHA256 generation for release artifacts (`checksums.sha256` and the public
+  release asset name `SHA256SUMS.txt`).
 - Markdown report generation under `dist/release-hardening/`.
 
 `dist/` is ignored because the generated artifacts are release outputs, not
@@ -38,3 +39,18 @@ For repeatable pre-beta evidence, run the manual `Release hardening` workflow.
 It executes the same script on Ubuntu and macOS and uploads the report, binary
 tarball, Python wheel, CycloneDX SBOM, checksum file, dependency inventory,
 license inventory, and secret scan output.
+
+To publish the Linux downstream-consumable assets to an existing GitHub
+Release, create the tag/Release so it targets the same commit as the workflow
+checkout, then dispatch `Release hardening` with `release_tag` set. After both
+hardening jobs pass, the workflow downloads the Linux hardening artifact and
+uploads:
+
+- `magazine-core-mh-linux-x86_64.tar.gz`
+- the canonical `magazine_core_plugin_sdk-*.whl`
+- `sbom.cyclonedx.json`
+- `SHA256SUMS.txt`
+
+The publish step verifies the checksum file and refuses to upload if the
+Release target commit differs from the checked-out commit. Leave `release_tag`
+empty for hardening-only runs.

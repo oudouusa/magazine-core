@@ -12,6 +12,9 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--per-page`.
 - Protocol conformance now includes a pinned `discover` request fixture with
   optional discover limits.
+- Release hardening now emits the public `SHA256SUMS.txt` checksum asset and
+  the manual workflow can publish Linux release assets to an existing GitHub
+  Release after verifying the target commit.
 
 ## [0.1.0-beta.1] - 2026-06-28
 
