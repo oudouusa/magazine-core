@@ -172,7 +172,7 @@ fn parse_timeout_seconds(value: &str) -> Result<Duration, Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N]"
+    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N] [--manage]"
 }
 
 struct DbStateProvider<'a> {

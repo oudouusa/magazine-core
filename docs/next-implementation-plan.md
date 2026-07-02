@@ -140,11 +140,15 @@ canonical DB schema:
    is implemented: loopback-only read-only default, no default auth for local
    read-only browsing, no remote-access support, and request-level protection
    requirements for future mutating routes.
-8. Next: implement explicit management mode in a separate full-loop
-   security-boundary PR only after preserving the documented boundary:
-   process-level `--manage` opt-in plus request-level guard, state-changing
-   `GET` rejection, and loopback `Host` / `Origin` validation before mutation
-   or local process control.
+8. Completed in the current explicit management-mode slice:
+   `docs/development/admin-viewer-ui-management-evidence-2026-07-02.md`
+   records `mh ui --manage` with request-level token guard, state-changing
+   `GET` rejection, loopback `Host` / `Origin` validation, guarded `init-db`,
+   policy-capped bounded `discover`, single active UI-started run tracking,
+   and cancellation for that UI-started run.
+9. Next: integrate the UI into release artifact / quickstart / conformance
+   smoke so a public binary can prove synthetic DB browsing and guarded
+   management-mode discover without a repo checkout.
 
 ## Maintainer Product Scope (contract-neutral)
 

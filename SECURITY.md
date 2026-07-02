@@ -38,12 +38,11 @@ shared remote host unless a separate security-boundary change defines and
 implements an explicit remote-access model. Loopback binding and read-only
 browsing are the security assumptions for the default UI.
 
-Future mutating UI operations must require an explicit management-mode process
-opt-in, but that opt-in is not sufficient by itself. Before any mutation or
-local process-control route runs, the route must also require an unguessable
-per-process local token or equivalent CSRF-resistant request guard, reject
-state-changing `GET` requests, and validate the loopback `Host` and `Origin`
-assumptions documented by the admin/viewer UI ADR.
+Mutating UI operations require an explicit management-mode process opt-in, but
+that opt-in is not sufficient by itself. Before any mutation or local
+process-control route runs, the route also requires an unguessable per-process
+local token, rejects state-changing `GET` requests, and validates the loopback
+`Host` and `Origin` assumptions documented by the admin/viewer UI ADR.
 
 Do not use this framework to access third-party sites without authorisation or
 in violation of their terms; ToS/legal compliance is the operator's
