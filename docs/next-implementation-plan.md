@@ -127,8 +127,14 @@ canonical DB schema:
    `--manage` opt-in plus request-level protection for mutating operations, no
    runtime Node dependency, and no protocol / SDK root API / canonical schema
    change.
-6. Next: implement the v1 read-only viewer for core DB summary, source record
-   browsing, typed `known_source_urls` state, and `plugins.d` manifest listing.
+6. Completed in the current read-only viewer slice:
+   `docs/development/admin-viewer-ui-readonly-evidence-2026-07-02.md` records
+   `mh ui --db <core.db> --plugins-dir <plugins.d> [--port N]`, loopback-only
+   binding, `GET`/`HEAD`-only routes, read-only DB projections for summary /
+   records / typed `known_source_urls`, and non-executing `plugins.d` manifest
+   listing with local path and secret-like environment redaction.
+7. Next: document the UI local trust model in `SECURITY.md` before any
+   management-mode endpoint is implemented.
 
 ## Maintainer Product Scope (contract-neutral)
 

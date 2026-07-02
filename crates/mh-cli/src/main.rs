@@ -10,6 +10,8 @@ use mh_host::{
 };
 use serde_json::{json, Value};
 
+mod ui;
+
 const DEFAULT_DISCOVER_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn main() {
@@ -41,6 +43,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         [cmd, rest @ ..] if cmd == "discover" => run_discover(rest),
+        [cmd, rest @ ..] if cmd == "ui" => {
+            ui::run_ui(ui::parse_ui_options(rest)?)?;
+            Ok(())
+        }
         _ => Err("invalid arguments".into()),
     }
 }
@@ -166,7 +172,7 @@ fn parse_timeout_seconds(value: &str) -> Result<Duration, Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]"
+    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N]"
 }
 
 struct DbStateProvider<'a> {
