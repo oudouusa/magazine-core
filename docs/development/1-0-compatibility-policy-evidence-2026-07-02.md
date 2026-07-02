@@ -69,4 +69,5 @@ future compatibility rules.
 
 ## Residual Risks
 
-- The stable tag decision itself remains open.
+- The stable tag decision was later recorded in
+  `docs/development/1-0-stable-tag-decision-2026-07-02.md`: do not cut yet.

@@ -164,8 +164,13 @@ canonical DB schema. The next priority is formal stable-tag criteria, not a
     `docs/compatibility-policy.md` documents stable `1.x` surfaces, additive
     changes, deprecations, breaking changes, security exceptions, and
     old+new compatibility windows.
-12. Next: decide whether the `1.0.0` tag should be cut. If not, record the
-    blocking gate item and rationale.
+12. Completed in the current C7 stable-tag decision slice:
+    `docs/development/1-0-stable-tag-decision-2026-07-02.md` records that
+    `1.0.0` should not be cut yet. The release-readiness blockers are the
+    missing current-surface beta stability window, no public artifact containing
+    the UI smoke path yet, and failing `1.0.0` version discipline because
+    package metadata, changelog, release notes, and tag agreement are not
+    prepared.
 
 ## Maintainer Product Scope (contract-neutral)
 
@@ -196,6 +201,9 @@ requires:
 - the standalone distribution and admin/viewer UI goals above
 - a documented post-`1.0.0` compatibility policy
 - version metadata, changelog, release notes, and GitHub Release tag agreement
+
+Current decision: do not cut `1.0.0` on 2026-07-02. See
+`docs/development/1-0-stable-tag-decision-2026-07-02.md`.
 
 ## Core Follow-Up Policy
 
