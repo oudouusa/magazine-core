@@ -134,8 +134,17 @@ canonical DB schema:
    binding, `GET`/`HEAD`-only routes, read-only DB projections for summary /
    records / typed `known_source_urls`, and non-executing `plugins.d` manifest
    listing with local path and secret-like environment redaction.
-7. Next: document the UI local trust model in `SECURITY.md` before any
-   management-mode endpoint is implemented.
+7. Completed in the current security-boundary docs slice:
+   `docs/development/admin-viewer-ui-security-evidence-2026-07-02.md` records
+   the `SECURITY.md` local UI trust model before any management-mode endpoint
+   is implemented: loopback-only read-only default, no default auth for local
+   read-only browsing, no remote-access support, and request-level protection
+   requirements for future mutating routes.
+8. Next: implement explicit management mode in a separate full-loop
+   security-boundary PR only after preserving the documented boundary:
+   process-level `--manage` opt-in plus request-level guard, state-changing
+   `GET` rejection, and loopback `Host` / `Origin` validation before mutation
+   or local process control.
 
 ## Maintainer Product Scope (contract-neutral)
 
