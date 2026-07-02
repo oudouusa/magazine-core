@@ -32,7 +32,9 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 ## 今後
 
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
-- 1.0 安定化は protocol / SDK の beta 運用を経てから判断する。
+- 1.0 安定化は protocol / SDK の beta 運用を経てから判断する。`1.0.0`
+  tag は `docs/release/public-visibility-checklist.md` の 1.0 eligibility
+  gate を満たすまで切らない。
 
 ## Standalone quickstart
 
@@ -57,7 +59,7 @@ python -m venv .venv
 .venv/bin/python -m pip install -e sdk/python pytest
 .venv/bin/python -m pytest sdk/python/tests
 bash conformance/check_golden.sh             # 独立 oracle と pinned golden の照合
-bash scripts/release-hardening.sh             # beta tag/SHA 前の artifact/checksum hardening
+bash scripts/release-hardening.sh             # release tag/SHA 前の artifact/checksum hardening
 cargo run -p mh-cli -- init-db ./scratch.db
 cargo run -p mh-cli -- inspect ./scratch.db
 cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 --per-page 30 --max-records 30 --timeout-seconds 60
@@ -94,3 +96,4 @@ cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 -
 - `docs/next-implementation-plan.md` — downstream evidence 後の stabilization plan
 - `docs/python-sdk.md` — Python SDK stable root API and advanced API tiers
 - `docs/migration-checklist.md` — downstream adapter migration and beta-readiness checklist
+- `docs/release/public-visibility-checklist.md` — public release and `1.0.0` eligibility gate

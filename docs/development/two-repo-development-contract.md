@@ -216,10 +216,10 @@ Rules:
 
 ## 9. Contract stability
 
-Current beta contract:
+Current public release status belongs in `README.md` and GitHub Releases, not
+in this contract. The stable contract identifiers are:
 
 ```text
-release = 0.1.0-beta.1
 protocol_version = 1
 record_schema_version = 1
 ```

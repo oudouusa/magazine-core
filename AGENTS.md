@@ -11,7 +11,8 @@ SQLite ベースの**出版物メタデータ収集・正規化フレームワ�
 
 - Rust host + 言語非依存 stdio plugin protocol + Python plugin SDK +
   canonical SQLite schema + conformance fixtures。
-- `0.1.0-beta.1` として公開済み（GitHub prerelease）。`protocol_version = 1` /
+- 現在の public release / 実装済み範囲は `README.md` のステータス節と
+  GitHub Releases を正本にする。`protocol_version = 1` /
   `record_schema_version = 1` は beta として凍結。
 - private downstream consumer は本 repo を versioned artifact（tag / commit SHA /
   binary / Python SDK）として消費する。artifact / contract の流れは

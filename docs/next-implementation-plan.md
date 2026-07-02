@@ -104,11 +104,13 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: Admin/viewer UI
+## Current Priority: 1.0 Stabilization Criteria
 
-Current bounded work continues the maintainer-approved product scope without changing
+Current bounded work has completed the maintainer-approved standalone
+distribution and admin/viewer UI product scope without changing
 `protocol_version`, `record_schema_version`, the Python SDK root API, or the
-canonical DB schema:
+canonical DB schema. The next priority is formal stable-tag criteria, not a
+`1.0.0` tag:
 
 1. Completed in the current standalone quickstart slice: documented and
    verified a linux-x86_64 quickstart where public Release artifacts alone run
@@ -152,7 +154,14 @@ canonical DB schema:
    guarded `--manage` discover. Release hardening now forces the UI smoke for
    freshly generated Linux artifacts while `VERIFY_UI=auto` keeps older
    pre-UI tags consumable.
-10. Next: formalize 1.0 criteria in public docs before any `1.0.0` tag.
+10. Completed in the current C7 criteria slice:
+    `docs/release/public-visibility-checklist.md` now contains the formal
+    `1.0.0` eligibility gate. The gate keeps stable tagging blocked until the
+    beta stability window, release artifact consumption, empty evidence queue,
+    docs/conformance completeness, standalone distribution, admin/viewer UI,
+    compatibility policy, and version discipline are all evidenced.
+11. Next: document post-`1.0.0` compatibility policy or record why the
+    `1.0.0` tag should not be cut yet.
 
 ## Maintainer Product Scope (contract-neutral)
 
@@ -169,16 +178,20 @@ Python SDK root API, or the canonical DB schema:
   protection; no runtime Node dependency in the distribution. The accepted ADR
   is `docs/development/admin-viewer-ui-adr-2026-07-02.md`.
 
-## 1.0 Criteria (to be formalized)
+## 1.0 Criteria
 
-Cut `1.0.0` only after all of the following hold, and formalize them in a
-dedicated docs PR before tagging:
+The formal gate is `docs/release/public-visibility-checklist.md` section
+`1.0.0 Eligibility Gate`. Cut `1.0.0` only after every item in that gate is
+true and the release notes link the supporting evidence. At a minimum this
+requires:
 
 - a beta window with zero contract changes
 - release artifact consumption working downstream
 - an empty evidence queue
 - complete protocol / SDK / conformance docs
 - the standalone distribution and admin/viewer UI goals above
+- a documented post-`1.0.0` compatibility policy
+- version metadata, changelog, release notes, and GitHub Release tag agreement
 
 ## Core Follow-Up Policy
 
@@ -191,4 +204,5 @@ When downstream finds a gap:
    and private extension code out of this repo.
 4. Update protocol docs and golden fixtures in the same PR for any contract
    change.
-5. Cut a new beta SHA or tag and let downstream lock files pin it.
+5. Cut a new beta or stable SHA/tag as appropriate and let downstream lock
+   files pin it. Stable tags must satisfy the public `1.0.0` eligibility gate.
