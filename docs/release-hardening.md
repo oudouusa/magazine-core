@@ -54,3 +54,8 @@ uploads:
 The publish step verifies the checksum file and refuses to upload if the
 Release target commit differs from the checked-out commit. Leave `release_tag`
 empty for hardening-only runs.
+
+For the beta line, these GitHub Release assets are the authoritative
+distribution channel. `cargo install`, PyPI, and Docker are deferred channels
+until their release cost, trust boundary, and version discipline are explicitly
+accepted; see `docs/development/distribution-channel-decision-2026-07-02.md`.

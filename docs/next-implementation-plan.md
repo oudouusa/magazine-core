@@ -112,9 +112,9 @@ canonical DB schema:
 1. Completed in the current standalone quickstart slice: documented and
    verified a linux-x86_64 quickstart where public Release artifacts alone run
    install -> `init-db` -> synthetic example `discover` -> `inspect`.
-2. Record the distribution-channel decision. GitHub Release artifacts remain
-   the source of truth; `cargo install`, PyPI, and Docker are evaluated only if
-   their cost/benefit justifies adding another channel.
+2. Completed in the current distribution-channel decision slice: GitHub Release
+   artifacts are the beta source of truth; `cargo install`, PyPI, and Docker
+   are deferred until their cost/benefit justifies another release surface.
 3. Lock version discipline so binary, wheel, tag, and CHANGELOG agree and
    release hardening verifies that agreement.
 4. Add a cold-start check in a clean environment or CI.
