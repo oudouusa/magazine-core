@@ -9,6 +9,7 @@ WHEEL_VENV_DIR="${OUT_DIR}/wheel-venv"
 REPORT="${OUT_DIR}/release-hardening-report.md"
 CARGO_METADATA="${OUT_DIR}/cargo-metadata.raw.json"
 DEPENDENCY_INVENTORY="${OUT_DIR}/dependency-inventory.json"
+VERSION_DISCIPLINE_REPORT="${OUT_DIR}/version-discipline.json"
 SBOM="${ARTIFACT_DIR}/sbom.cyclonedx.json"
 BINARY_NAME="mh"
 EXPECTED_RELEASE_REF="${EXPECTED_RELEASE_REF:-main}"
@@ -67,6 +68,10 @@ checksum_file() {
   fi
 }
 
+run python3 "${ROOT}/scripts/check-version-discipline.py" \
+  --root "${ROOT}" \
+  --release-ref "${release_ref}" \
+  --json > "${VERSION_DISCIPLINE_REPORT}"
 run cargo fmt --all -- --check
 run cargo clippy --workspace --all-targets --locked -- -D warnings
 run cargo test --workspace --locked
@@ -372,9 +377,12 @@ cat > "${REPORT}" <<EOF
 - rustc: $(rustc --version)
 - cargo: $(cargo --version)
 - python: $("${VENV_DIR}/bin/python" --version)
+- package_version: $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["package_version"])' "${VERSION_DISCIPLINE_REPORT}")
+- release_version: $(python3 -c 'import json,sys; value=json.load(open(sys.argv[1], encoding="utf-8"))["release_version"]; print(value if value is not None else "n/a")' "${VERSION_DISCIPLINE_REPORT}")
 
 ## checks
 
+- version discipline: pass
 - cargo fmt --all -- --check: pass
 - cargo clippy --workspace --all-targets --locked -- -D warnings: pass
 - cargo test --workspace --locked: pass
@@ -400,6 +408,7 @@ cat > "${REPORT}" <<EOF
 
 Artifact files and checksums are in \`artifacts/\`.
 Dependency inventory is \`dependency-inventory.json\`.
+Version discipline report is \`version-discipline.json\`.
 CycloneDX SBOM is \`artifacts/sbom.cyclonedx.json\`.
 License summary is \`license-inventory.txt\`.
 Secret scan summary is \`secret-scan.txt\`.

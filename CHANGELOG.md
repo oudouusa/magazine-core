@@ -13,6 +13,9 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Distribution-channel decision docs record GitHub Release artifacts as the
   beta source of truth and defer `cargo install`, PyPI, and Docker until they
   justify a separate release surface.
+- Release hardening now checks version discipline across Cargo packages, the
+  Python SDK project metadata that determines wheel versioning, and tag /
+  changelog / release-note agreement when a version tag is provided.
 
 ## [0.1.0-beta.2] - 2026-07-02
 
