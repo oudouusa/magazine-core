@@ -47,7 +47,7 @@ bash conformance/check_golden.sh             # 独立 oracle と pinned golden �
 bash scripts/release-hardening.sh             # beta tag/SHA 前の artifact/checksum hardening
 cargo run -p mh-cli -- init-db ./scratch.db
 cargo run -p mh-cli -- inspect ./scratch.db
-cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 --per-page 30 --max-records 30
+cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 --per-page 30 --max-records 30 --timeout-seconds 60
 ```
 
 `init-db` は新規 core DB、空の未初期化 DB、または既存 core DB だけを対象にする。
