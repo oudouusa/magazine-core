@@ -12,6 +12,11 @@ DEPENDENCY_INVENTORY="${OUT_DIR}/dependency-inventory.json"
 SBOM="${ARTIFACT_DIR}/sbom.cyclonedx.json"
 BINARY_NAME="mh"
 EXPECTED_RELEASE_REF="${EXPECTED_RELEASE_REF:-main}"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT}/target}"
+if [[ "${CARGO_TARGET_DIR}" != /* ]]; then
+  CARGO_TARGET_DIR="${ROOT}/${CARGO_TARGET_DIR}"
+fi
+export CARGO_TARGET_DIR
 
 release_ref="${RELEASE_REF_NAME:-${GITHUB_REF_NAME:-}}"
 if [[ -z "${release_ref}" ]]; then
@@ -73,11 +78,11 @@ run "${VENV_DIR}/bin/python" -m pytest "${ROOT}/sdk/python/tests"
 run "${VENV_DIR}/bin/python" -m pip install "setuptools>=68" wheel
 
 run cargo build --release -p mh-cli --locked
-run "${ROOT}/target/release/mh" --help
-run "${ROOT}/target/release/mh" init-db "${OUT_DIR}/scratch.db"
-run "${ROOT}/target/release/mh" inspect "${OUT_DIR}/scratch.db"
-run "${ROOT}/target/release/mh" discover "${OUT_DIR}/scratch.db" "${ROOT}/plugins.d" example
-run tar -czf "${ARTIFACT_DIR}/${binary_package}" -C "${ROOT}/target/release" "${BINARY_NAME}"
+run "${CARGO_TARGET_DIR}/release/mh" --help
+run "${CARGO_TARGET_DIR}/release/mh" init-db "${OUT_DIR}/scratch.db"
+run "${CARGO_TARGET_DIR}/release/mh" inspect "${OUT_DIR}/scratch.db"
+run "${CARGO_TARGET_DIR}/release/mh" discover "${OUT_DIR}/scratch.db" "${ROOT}/plugins.d" example
+run tar -czf "${ARTIFACT_DIR}/${binary_package}" -C "${CARGO_TARGET_DIR}/release" "${BINARY_NAME}"
 run "${VENV_DIR}/bin/python" -m pip wheel --no-deps --no-build-isolation -w "${ARTIFACT_DIR}" "${ROOT}/sdk/python"
 wheel_files=("${ARTIFACT_DIR}"/magazine_core_plugin_sdk-*.whl)
 if [[ "${wheel_files[0]}" == "${ARTIFACT_DIR}/magazine_core_plugin_sdk-*.whl" || ! -f "${wheel_files[0]}" ]]; then
@@ -345,11 +350,12 @@ fi
 (
   cd "${ARTIFACT_DIR}"
   checksum_file ./* > checksums.sha256
+  cp checksums.sha256 SHA256SUMS.txt
 )
 
-binary_sha="$(awk -v file="${binary_package}" '{path=$2; sub(/^\.\//, "", path); if (path == file) print $1}' "${ARTIFACT_DIR}/checksums.sha256")"
-python_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path ~ /^magazine_core_plugin_sdk-.*\.whl$/) print $1}' "${ARTIFACT_DIR}/checksums.sha256")"
-sbom_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path == "sbom.cyclonedx.json") print $1}' "${ARTIFACT_DIR}/checksums.sha256")"
+binary_sha="$(awk -v file="${binary_package}" '{path=$2; sub(/^\.\//, "", path); if (path == file) print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
+python_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path ~ /^magazine_core_plugin_sdk-.*\.whl$/) print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
+sbom_sha="$(awk '{path=$2; sub(/^\.\//, "", path); if (path == "sbom.cyclonedx.json") print $1}' "${ARTIFACT_DIR}/SHA256SUMS.txt")"
 finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 cat > "${REPORT}" <<EOF
@@ -401,4 +407,4 @@ Secret history scan summary is \`secret-history-scan.txt\`.
 EOF
 
 echo "release hardening report: ${REPORT}"
-cat "${ARTIFACT_DIR}/checksums.sha256"
+cat "${ARTIFACT_DIR}/SHA256SUMS.txt"
