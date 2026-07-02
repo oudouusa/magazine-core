@@ -8,6 +8,12 @@ the assets are downloaded.
 Current published prebuilt host coverage is linux-x86_64. Other platforms can
 build from source until a matching host binary is published.
 
+The beta distribution source of truth is the GitHub Release for the selected
+tag: host binary tarball, Python SDK wheel, CycloneDX SBOM, and
+`SHA256SUMS.txt`. `cargo install`, PyPI, and Docker images are not beta
+distribution channels yet; see
+`docs/development/distribution-channel-decision-2026-07-02.md`.
+
 ## Fast verification
 
 From a magazine-core checkout, run the release-consuming checker:

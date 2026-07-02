@@ -10,6 +10,9 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Standalone quickstart docs and a release-consuming checker that verifies
   linux-x86_64 GitHub Release artifacts can run `init-db`, synthetic
   `discover`, and `inspect` without repo paths.
+- Distribution-channel decision docs record GitHub Release artifacts as the
+  beta source of truth and defer `cargo install`, PyPI, and Docker until they
+  justify a separate release surface.
 
 ## [0.1.0-beta.2] - 2026-07-02
 
