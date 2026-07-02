@@ -102,3 +102,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: bash scripts/upload-release-assets.sh "${RELEASE_TAG}" dist/release-hardening-linux/artifacts
+
+  standalone-cold-start:
+    name: standalone cold-start
+    runs-on: ubuntu-latest
+    needs: publish-release-assets
+    if: ${{ inputs.release_tag != '' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.release_tag }}
+
+      - name: verify public artifact quickstart
+        env:
+          REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bash scripts/verify-standalone-quickstart.sh

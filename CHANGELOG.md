@@ -16,6 +16,9 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Release hardening now checks version discipline across Cargo packages, the
   Python SDK project metadata that determines wheel versioning, and tag /
   changelog / release-note agreement when a version tag is provided.
+- Release-tag hardening dispatches now run a standalone cold-start job after
+  publishing Linux assets, verifying public GitHub Release artifacts with the
+  artifact-only quickstart checker.
 
 ## [0.1.0-beta.2] - 2026-07-02
 

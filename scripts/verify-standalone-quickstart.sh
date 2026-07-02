@@ -31,7 +31,7 @@ download() {
   local name="$1"
   local url="${RELEASE_BASE_URL}/${name}"
   echo "+ curl -fsSL -o ${name} ${url}" >&2
-  curl -fsSL -o "${name}" "${url}"
+  curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors -o "${name}" "${url}"
 }
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
