@@ -5,6 +5,8 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-07-02
+
 ### Added
 
 - `mh discover` accepts optional discover limits:
@@ -12,9 +14,23 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--per-page`.
 - Protocol conformance now includes a pinned `discover` request fixture with
   optional discover limits.
+- Python SDK authors can emit batched records with `send_records()` over the
+  existing protocol v1 `records` notification shape.
+- `mh discover` accepts a configurable plugin runtime budget with
+  `--timeout-seconds`, using the existing protocol v1 `remaining_ms` field.
 - Release hardening now emits the public `SHA256SUMS.txt` checksum asset and
   the manual workflow can publish Linux release assets to an existing GitHub
   Release after verifying the target commit.
+
+### Fixed
+
+- The host allows plugins that already sent a final discover response a short
+  grace period to exit cleanly before enforcing fail-closed termination.
+
+### Documentation
+
+- Added the public two-repo development contract and refreshed agent guidance
+  for evidence-driven post-beta development.
 
 ## [0.1.0-beta.1] - 2026-06-28
 
@@ -61,4 +77,5 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[0.1.0-beta.2]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.1
