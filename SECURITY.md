@@ -18,6 +18,11 @@ The framework **does** own generic safety as first-class behaviour:
 - plugins are trusted executable code; process separation isolates crashes and
   lifecycle, not authority. Untrusted-plugin sandboxing is out of scope.
 
+Security fixes may tighten behavior before the normal compatibility window when
+unsafe behavior would otherwise remain exposed. The general post-`1.0.0`
+compatibility rules and this security exception are documented in
+`docs/compatibility-policy.md`.
+
 ## Local UI trust model
 
 `mh ui` is a local operator tool served by the CLI host. The default C6 viewer

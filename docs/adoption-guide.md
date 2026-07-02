@@ -18,7 +18,7 @@ downstream は core ソースを複製せず、**binary / wheel / commit SHA ま
 正本が二つになるのを防ぐ。downstream に置く lock の一般形:
 
 ```toml
-core_version = "0.1.0-alpha.N | 0.1.0-beta.N"
+core_version = "0.1.0-alpha.N | 0.1.0-beta.N | 1.x.y"
 core_commit = "<full commit sha>"
 protocol_version = 1
 record_schema_version = 1
@@ -73,11 +73,11 @@ existing downstream legacy DB
 
 ```
 1. core で契約・実装を変更
-2. alpha/beta tag または commit SHA を作る
+2. alpha/beta/stable tag または commit SHA を作る
 3. downstream の lock を更新
 4. downstream で integration / parity 実行
 5. 問題があれば core へ修正 PR
-6. 新 alpha/beta artifact を downstream で再検証
+6. 新 artifact を downstream で再検証
 7. 安定後に旧 downstream 実装を削除
 ```
 
@@ -105,6 +105,7 @@ promotion/import する境界を固定してから扱う。
 ## 7. 関連（core 側の generic 成果物）
 
 - `docs/protocol-v1.md` — protocol 正本
+- `docs/compatibility-policy.md` — post-`1.0.0` compatibility policy
 - `docs/migration-checklist.md` — adapter 1 件ごとの汎用チェックリスト
 - `docs/next-implementation-plan.md` — downstream evidence 後の stabilization plan
 - `examples/python-synthetic-plugin/` — synthetic Python plugin

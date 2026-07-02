@@ -160,8 +160,12 @@ canonical DB schema. The next priority is formal stable-tag criteria, not a
     beta stability window, release artifact consumption, empty evidence queue,
     docs/conformance completeness, standalone distribution, admin/viewer UI,
     compatibility policy, and version discipline are all evidenced.
-11. Next: document post-`1.0.0` compatibility policy or record why the
-    `1.0.0` tag should not be cut yet.
+11. Completed in the current C7 compatibility-policy slice:
+    `docs/compatibility-policy.md` documents stable `1.x` surfaces, additive
+    changes, deprecations, breaking changes, security exceptions, and
+    old+new compatibility windows.
+12. Next: decide whether the `1.0.0` tag should be cut. If not, record the
+    blocking gate item and rationale.
 
 ## Maintainer Product Scope (contract-neutral)
 

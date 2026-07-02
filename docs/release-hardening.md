@@ -2,9 +2,10 @@
 
 Run release hardening before cutting a release tag or downstream candidate SHA.
 For a stable `1.0.0` tag, complete the 1.0 eligibility gate in
-`docs/release/public-visibility-checklist.md` first. The script is intentionally
-self-contained so a downstream lock update can cite artifact checksums from a
-repeatable command.
+`docs/release/public-visibility-checklist.md` first; post-`1.0.0`
+compatibility rules are in `docs/compatibility-policy.md`. The script is
+intentionally self-contained so a downstream lock update can cite artifact
+checksums from a repeatable command.
 
 ```bash
 bash scripts/release-hardening.sh
