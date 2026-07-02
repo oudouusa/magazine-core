@@ -1,20 +1,67 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mh_db::Database;
-use mh_host::inspect_plugin_manifests;
+use mh_host::{
+    discover_plugins, inspect_plugin_manifests, CancellationToken, DiscoverLimits, HostError,
+    PluginHost, StateError,
+};
 use serde_json::{json, Value};
 
 const DEFAULT_UI_PORT: u16 = 8765;
 const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+const MAX_MANAGE_DISCOVER_PAGES: u64 = 1_000;
+const MAX_MANAGE_DISCOVER_PER_PAGE: u64 = 1_000;
+const MAX_MANAGE_DISCOVER_RECORDS: u64 = 10_000;
+const MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS: u64 = 3_600;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct UiOptions {
     db_path: PathBuf,
     plugins_dir: PathBuf,
     port: u16,
+    bound_port: u16,
+    manage: bool,
+    token: Option<String>,
+    run_state: Arc<Mutex<ManagementState>>,
+}
+
+#[derive(Debug, Default)]
+struct ManagementState {
+    active: Option<ActiveRun>,
+    last: Option<CompletedRun>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveRun {
+    run_id: String,
+    plugin_id: String,
+    started_at: u64,
+    cancel_token: CancellationToken,
+    cancellable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CompletedRun {
+    run_id: String,
+    plugin_id: String,
+    status: &'static str,
+    finished_at: u64,
+    result: Value,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoverRequest {
+    plugin_id: String,
+    limits: DiscoverLimits,
+    timeout: Duration,
 }
 
 pub(crate) fn parse_ui_options(args: &[String]) -> Result<UiOptions, Box<dyn Error>> {
@@ -22,11 +69,20 @@ pub(crate) fn parse_ui_options(args: &[String]) -> Result<UiOptions, Box<dyn Err
     let mut plugins_dir = None;
     let mut port = DEFAULT_UI_PORT;
     let mut port_seen = false;
+    let mut manage = false;
     let mut index = 0;
     while index < args.len() {
         let flag = args[index].as_str();
-        if matches!(flag, "--host" | "--bind" | "--manage") {
-            return Err(format!("{flag} is not accepted by the read-only v1 UI").into());
+        if matches!(flag, "--host" | "--bind") {
+            return Err(format!("{flag} is not accepted by the local-only UI").into());
+        }
+        if flag == "--manage" {
+            if manage {
+                return Err("--manage specified more than once".into());
+            }
+            manage = true;
+            index += 1;
+            continue;
         }
         let Some(value) = args.get(index + 1) else {
             return Err(format!("{flag} requires a value").into());
@@ -59,13 +115,24 @@ pub(crate) fn parse_ui_options(args: &[String]) -> Result<UiOptions, Box<dyn Err
         db_path: db_path.ok_or("--db is required")?,
         plugins_dir: plugins_dir.ok_or("--plugins-dir is required")?,
         port,
+        bound_port: port,
+        manage,
+        token: None,
+        run_state: Arc::new(Mutex::new(ManagementState::default())),
     })
 }
 
-pub(crate) fn run_ui(options: UiOptions) -> Result<(), Box<dyn Error>> {
+pub(crate) fn run_ui(mut options: UiOptions) -> Result<(), Box<dyn Error>> {
     let listener = bind_ui_listener(options.port)?;
     let address = listener.local_addr()?;
+    options.bound_port = address.port();
+    if options.manage {
+        options.token = Some(generate_token()?);
+    }
     println!("mh ui listening on http://{address}");
+    if options.manage {
+        println!("mh ui management mode enabled for this local process");
+    }
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -86,7 +153,7 @@ fn bind_ui_listener(port: u16) -> io::Result<TcpListener> {
 fn serve_connection(options: &UiOptions, stream: &mut TcpStream) -> io::Result<()> {
     let request = read_http_request(stream)?;
     let response = match request {
-        Some(request) => handle_request(options, &request.method, &request.target),
+        Some(request) => handle_request(options, &request),
         None => HttpResponse::new(
             400,
             "Bad Request",
@@ -103,23 +170,29 @@ fn serve_connection(options: &UiOptions, stream: &mut TcpStream) -> io::Result<(
 struct HttpRequest {
     method: String,
     target: String,
+    headers: BTreeMap<String, String>,
+    body: Vec<u8>,
 }
 
 fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 1024];
-    while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+    let header_end = loop {
+        if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+            break index + 4;
+        }
         let read = stream.read(&mut chunk)?;
         if read == 0 {
-            break;
+            return Ok(None);
         }
         buffer.extend_from_slice(&chunk[..read]);
         if buffer.len() > MAX_REQUEST_HEADER_BYTES {
             return Ok(None);
         }
-    }
-    let text = String::from_utf8_lossy(&buffer);
-    let Some(line) = text.lines().next() else {
+    };
+    let text = String::from_utf8_lossy(&buffer[..header_end]);
+    let mut lines = text.lines();
+    let Some(line) = lines.next() else {
         return Ok(None);
     };
     let mut parts = line.split_whitespace();
@@ -135,9 +208,50 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> 
     if !version.starts_with("HTTP/") || parts.next().is_some() {
         return Ok(None);
     }
+    let mut headers = BTreeMap::new();
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Ok(None);
+        };
+        let key = name.trim().to_ascii_lowercase();
+        if key == "transfer-encoding" {
+            return Ok(None);
+        }
+        if matches!(key.as_str(), "host" | "content-length") && headers.contains_key(&key) {
+            return Ok(None);
+        }
+        headers.insert(key, value.trim().to_string());
+    }
+    let content_length = match headers.get("content-length") {
+        Some(value) => match value.parse::<usize>() {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(None),
+        },
+        None => 0,
+    };
+    if content_length > MAX_REQUEST_BODY_BYTES {
+        return Ok(None);
+    }
+    let mut body = buffer[header_end..].to_vec();
+    while body.len() < content_length {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk[..read]);
+        if body.len() > MAX_REQUEST_BODY_BYTES {
+            return Ok(None);
+        }
+    }
+    body.truncate(content_length);
     Ok(Some(HttpRequest {
         method: method.to_string(),
         target: target.to_string(),
+        headers,
+        body,
     }))
 }
 
@@ -188,24 +302,26 @@ impl HttpResponse {
     }
 }
 
-fn handle_request(options: &UiOptions, method: &str, target: &str) -> HttpResponse {
-    if !matches!(method, "GET" | "HEAD") {
-        return HttpResponse::new(
-            405,
-            "Method Not Allowed",
-            "application/json",
-            json_bytes(json!({"error": "method not allowed"})),
-        )
-        .with_header("Allow", "GET, HEAD");
-    }
-    let head = method == "HEAD";
-    let (path, query) = split_target(target);
-    let mut response = match path {
-        "/" => html_response(INDEX_HTML),
-        "/api/summary" => summary_response(options),
-        "/api/records" => records_response(options, query),
-        "/api/state/known-source-urls" => known_source_urls_response(options, query),
-        "/api/plugins" => plugins_response(options),
+fn handle_request(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
+    let head = request.method == "HEAD";
+    let (path, query) = split_target(&request.target);
+    let mut response = match (request.method.as_str(), path) {
+        ("GET" | "HEAD", "/") => html_response(&index_html(options)),
+        ("GET" | "HEAD", "/api/summary") => summary_response(options),
+        ("GET" | "HEAD", "/api/records") => records_response(options, query),
+        ("GET" | "HEAD", "/api/state/known-source-urls") => {
+            known_source_urls_response(options, query)
+        }
+        ("GET" | "HEAD", "/api/plugins") => plugins_response(options),
+        ("GET" | "HEAD", "/api/manage/status") => management_status_response(options),
+        ("POST", "/api/manage/init-db") => init_db_response(options, request),
+        ("POST", "/api/manage/discover") => discover_response(options, request),
+        ("POST", "/api/manage/cancel") => cancel_response(options, request),
+        ("GET" | "HEAD", "/api/manage/init-db" | "/api/manage/discover" | "/api/manage/cancel") => {
+            method_not_allowed("POST")
+        }
+        ("POST", _) => method_not_allowed("GET, HEAD"),
+        (_, _) if is_known_path(path) => method_not_allowed("GET, HEAD"),
         _ => HttpResponse::new(
             404,
             "Not Found",
@@ -217,6 +333,30 @@ fn handle_request(options: &UiOptions, method: &str, target: &str) -> HttpRespon
         response = response.without_body();
     }
     response
+}
+
+fn is_known_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/" | "/api/summary"
+            | "/api/records"
+            | "/api/state/known-source-urls"
+            | "/api/plugins"
+            | "/api/manage/status"
+            | "/api/manage/init-db"
+            | "/api/manage/discover"
+            | "/api/manage/cancel"
+    )
+}
+
+fn method_not_allowed(allow: &'static str) -> HttpResponse {
+    HttpResponse::new(
+        405,
+        "Method Not Allowed",
+        "application/json",
+        json_bytes(json!({"error": "method not allowed"})),
+    )
+    .with_header("Allow", allow)
 }
 
 fn summary_response(options: &UiOptions) -> HttpResponse {
@@ -274,6 +414,360 @@ fn plugins_response(options: &UiOptions) -> HttpResponse {
     }
 }
 
+fn management_status_response(options: &UiOptions) -> HttpResponse {
+    let state = options.run_state.lock().expect("management state poisoned");
+    json_response(
+        200,
+        json!({
+            "manage": options.manage,
+            "active": state.active.as_ref().map(active_run_json),
+            "last": state.last.as_ref().map(completed_run_json),
+        }),
+    )
+}
+
+fn init_db_response(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
+    if let Err(response) = require_management_request(options, request) {
+        return response;
+    }
+    match Database::open(&options.db_path).and_then(|db| {
+        db.initialize()?;
+        db.inspect()
+    }) {
+        Ok(inspection) => json_response(200, json!({"inspection": inspection})),
+        Err(err) => json_response(
+            500,
+            json!({"error": "init-db failed", "detail": err.to_string()}),
+        ),
+    }
+}
+
+fn discover_response(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
+    if let Err(response) = require_management_request(options, request) {
+        return response;
+    }
+    let discover = match parse_discover_request(&request.body) {
+        Ok(discover) => discover,
+        Err(message) => return json_response(400, json!({"error": message})),
+    };
+    let run_id = format!(
+        "ui-{}",
+        generate_token().unwrap_or_else(|_| unix_seconds().to_string())
+    );
+    let cancel_token = CancellationToken::new();
+    {
+        let mut state = options.run_state.lock().expect("management state poisoned");
+        if state.active.is_some() {
+            return json_response(409, json!({"error": "discover already running"}));
+        }
+        state.active = Some(ActiveRun {
+            run_id: run_id.clone(),
+            plugin_id: discover.plugin_id.clone(),
+            started_at: unix_seconds(),
+            cancel_token: cancel_token.clone(),
+            cancellable: true,
+        });
+    }
+
+    let db_path = options.db_path.clone();
+    let plugins_dir = options.plugins_dir.clone();
+    let run_state = Arc::clone(&options.run_state);
+    let thread_run_id = run_id.clone();
+    thread::spawn(move || {
+        let completed = run_ui_discover(
+            &db_path,
+            &plugins_dir,
+            &thread_run_id,
+            discover,
+            &cancel_token,
+            &run_state,
+        );
+        let mut state = run_state.lock().expect("management state poisoned");
+        if state.active.as_ref().map(|active| active.run_id.as_str())
+            == Some(thread_run_id.as_str())
+        {
+            state.active = None;
+        }
+        state.last = Some(completed);
+    });
+
+    json_response(202, json!({"run_id": run_id, "status": "running"}))
+}
+
+fn cancel_response(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
+    if let Err(response) = require_management_request(options, request) {
+        return response;
+    }
+    let requested_run_id = if request.body.is_empty() {
+        None
+    } else {
+        match serde_json::from_slice::<Value>(&request.body) {
+            Ok(value) => value
+                .get("run_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            Err(_) => return json_response(400, json!({"error": "invalid JSON body"})),
+        }
+    };
+    let mut state = options.run_state.lock().expect("management state poisoned");
+    let Some(active) = state.active.as_mut() else {
+        return json_response(409, json!({"error": "no active UI discover run"}));
+    };
+    if requested_run_id
+        .as_deref()
+        .is_some_and(|run_id| run_id != active.run_id)
+    {
+        return json_response(404, json!({"error": "active run_id does not match"}));
+    }
+    if !active.cancellable {
+        return json_response(
+            409,
+            json!({"error": "active UI discover run is no longer cancellable"}),
+        );
+    }
+    active.cancel_token.cancel();
+    json_response(
+        202,
+        json!({"run_id": active.run_id, "status": "cancelling"}),
+    )
+}
+
+fn require_management_request(
+    options: &UiOptions,
+    request: &HttpRequest,
+) -> Result<(), HttpResponse> {
+    if !options.manage {
+        return Err(json_response(
+            403,
+            json!({"error": "management mode disabled"}),
+        ));
+    }
+    if request.method != "POST" {
+        return Err(method_not_allowed("POST"));
+    }
+    let host = request
+        .headers
+        .get("host")
+        .ok_or_else(|| json_response(400, json!({"error": "Host header is required"})))?;
+    if !is_allowed_loopback_authority(host, options.bound_port) {
+        return Err(json_response(403, json!({"error": "invalid Host header"})));
+    }
+    if let Some(origin) = request.headers.get("origin") {
+        if !is_allowed_origin(origin, options.bound_port) {
+            return Err(json_response(
+                403,
+                json!({"error": "invalid Origin header"}),
+            ));
+        }
+    }
+    let expected = options
+        .token
+        .as_deref()
+        .ok_or_else(|| json_response(500, json!({"error": "management token unavailable"})))?;
+    match request.headers.get("x-mh-ui-token") {
+        Some(actual) if actual == expected => Ok(()),
+        _ => Err(json_response(
+            403,
+            json!({"error": "invalid management token"}),
+        )),
+    }
+}
+
+fn run_ui_discover(
+    db_path: &PathBuf,
+    plugins_dir: &PathBuf,
+    run_id: &str,
+    discover: DiscoverRequest,
+    cancel_token: &CancellationToken,
+    run_state: &Arc<Mutex<ManagementState>>,
+) -> CompletedRun {
+    let plugin_id = discover.plugin_id.clone();
+    let result = run_ui_discover_inner(
+        db_path,
+        plugins_dir,
+        run_id,
+        discover,
+        cancel_token,
+        run_state,
+    );
+    let (status, result) = match result {
+        Ok(result) => ("succeeded", result),
+        Err(HostError::Cancelled) => ("cancelled", json!({"error": "cancelled"})),
+        Err(err) => ("failed", json!({"error": err.to_string()})),
+    };
+    CompletedRun {
+        run_id: run_id.to_string(),
+        plugin_id,
+        status,
+        finished_at: unix_seconds(),
+        result,
+    }
+}
+
+fn run_ui_discover_inner(
+    db_path: &PathBuf,
+    plugins_dir: &PathBuf,
+    run_id: &str,
+    discover: DiscoverRequest,
+    cancel_token: &CancellationToken,
+    run_state: &Arc<Mutex<ManagementState>>,
+) -> Result<Value, HostError> {
+    let mut db = Database::open(db_path)
+        .map_err(|err| HostError::State(StateError::backend(err.to_string())))?;
+    db.initialize()
+        .map_err(|err| HostError::State(StateError::backend(err.to_string())))?;
+    let plugins = discover_plugins(plugins_dir)?;
+    let plugin = plugins
+        .iter()
+        .find(|plugin| plugin.id == discover.plugin_id)
+        .ok_or_else(|| HostError::Discovery(format!("plugin not found: {}", discover.plugin_id)))?;
+    let run = {
+        let state_provider = crate::DbStateProvider { db: &db };
+        PluginHost::default().run_discover_with_state_provider_and_cancel(
+            plugin,
+            run_id,
+            discover.limits,
+            discover.timeout,
+            &state_provider,
+            cancel_token,
+        )?
+    };
+    mark_run_ingesting(run_state, run_id, cancel_token)?;
+    let ingest = db
+        .ingest_records(&run.records)
+        .map_err(|err| HostError::State(StateError::backend(err.to_string())))?;
+    Ok(json!({
+        "plugin_id": plugin.id,
+        "source_name": run.manifest.source_name,
+        "discover_records": run.discover_records,
+        "spooled_records": run.records.len(),
+        "ingested_records": ingest.records,
+        "exit_status": run.exit_status.as_ref().and_then(|status| status.code()),
+        "logs": run.logs.iter().map(|log| {
+            json!({"level": log.level, "message": log.message})
+        }).collect::<Vec<_>>()
+    }))
+}
+
+fn parse_discover_request(body: &[u8]) -> Result<DiscoverRequest, String> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| "invalid JSON body".to_string())?;
+    let plugin_id = required_string(&value, "plugin_id")?;
+    let max_pages = required_bounded_u64(&value, "max_pages", MAX_MANAGE_DISCOVER_PAGES)?;
+    let per_page = required_bounded_u64(&value, "per_page", MAX_MANAGE_DISCOVER_PER_PAGE)?;
+    let max_records = required_bounded_u64(&value, "max_records", MAX_MANAGE_DISCOVER_RECORDS)?;
+    let timeout_seconds = required_bounded_u64(
+        &value,
+        "timeout_seconds",
+        MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS,
+    )?;
+    Ok(DiscoverRequest {
+        plugin_id,
+        limits: DiscoverLimits {
+            max_pages: Some(max_pages),
+            max_records: Some(max_records),
+            per_page: Some(per_page),
+        },
+        timeout: Duration::from_secs(timeout_seconds),
+    })
+}
+
+fn required_string(value: &Value, key: &str) -> Result<String, String> {
+    let parsed = value
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{key} is required"))?;
+    if parsed.trim().is_empty() {
+        return Err(format!("{key} must not be empty"));
+    }
+    Ok(parsed.to_string())
+}
+
+fn required_bounded_u64(value: &Value, key: &str, max: u64) -> Result<u64, String> {
+    let parsed = value
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("{key} is required"))?;
+    if parsed == 0 {
+        return Err(format!("{key} must be greater than zero"));
+    }
+    if parsed > max {
+        return Err(format!("{key} must be less than or equal to {max}"));
+    }
+    Ok(parsed)
+}
+
+fn mark_run_ingesting(
+    run_state: &Arc<Mutex<ManagementState>>,
+    run_id: &str,
+    cancel_token: &CancellationToken,
+) -> Result<(), HostError> {
+    let mut state = run_state.lock().expect("management state poisoned");
+    let active = state
+        .active
+        .as_mut()
+        .filter(|active| active.run_id == run_id)
+        .ok_or_else(|| HostError::State(StateError::backend("UI run state is not active")))?;
+    if active.cancel_token.is_cancelled() || cancel_token.is_cancelled() {
+        return Err(HostError::Cancelled);
+    }
+    active.cancellable = false;
+    Ok(())
+}
+
+fn active_run_json(run: &ActiveRun) -> Value {
+    json!({
+        "run_id": run.run_id,
+        "plugin_id": run.plugin_id,
+        "started_at": run.started_at,
+        "status": if run.cancel_token.is_cancelled() {
+            "cancelling"
+        } else if run.cancellable {
+            "running"
+        } else {
+            "ingesting"
+        },
+    })
+}
+
+fn completed_run_json(run: &CompletedRun) -> Value {
+    json!({
+        "run_id": run.run_id,
+        "plugin_id": run.plugin_id,
+        "status": run.status,
+        "finished_at": run.finished_at,
+        "result": run.result,
+    })
+}
+
+fn is_allowed_loopback_authority(value: &str, port: u16) -> bool {
+    value == format!("127.0.0.1:{port}") || value == format!("localhost:{port}")
+}
+
+fn is_allowed_origin(value: &str, port: u16) -> bool {
+    value == format!("http://127.0.0.1:{port}") || value == format!("http://localhost:{port}")
+}
+
+fn generate_token() -> Result<String, Box<dyn Error>> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|err| format!("token generation failed: {err}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn index_html(options: &UiOptions) -> String {
+    let config = json!({
+        "manage": options.manage,
+        "token": options.token.as_deref().unwrap_or(""),
+    });
+    INDEX_HTML.replace("__MH_UI_CONFIG__", &config.to_string())
+}
+
 fn html_response(html: &str) -> HttpResponse {
     HttpResponse::new(
         200,
@@ -286,6 +780,12 @@ fn html_response(html: &str) -> HttpResponse {
 fn json_response(status: u16, value: Value) -> HttpResponse {
     let reason = match status {
         200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
+        403 => "Forbidden",
+        404 => "Not Found",
+        409 => "Conflict",
+        500 => "Internal Server Error",
         _ => "OK",
     };
     HttpResponse::new(
@@ -405,6 +905,11 @@ code { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, C
 .valid { color: var(--accent); }
 .list { display: grid; gap: 4px; }
 .muted { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; font-weight: 600; }
+input, select, button { border: 1px solid var(--line); border-radius: 6px; padding: 7px 8px; background: #fff; color: var(--ink); font: inherit; }
+button { cursor: pointer; font-weight: 650; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 @media (max-width: 760px) {
   header { display: block; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -435,8 +940,23 @@ code { color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, C
     <h2>Plugins</h2>
     <table><thead><tr><th>manifest</th><th>id</th><th>argv</th><th>status</th></tr></thead><tbody id="plugins"></tbody></table>
   </section>
+  <section id="management" hidden>
+    <h2>Management</h2>
+    <div class="controls">
+      <label>Plugin <select id="manage-plugin"></select></label>
+      <label>Max pages <input id="manage-max-pages" type="number" min="1" max="1000" value="1"></label>
+      <label>Per page <input id="manage-per-page" type="number" min="1" max="1000" value="30"></label>
+      <label>Max records <input id="manage-max-records" type="number" min="1" max="10000" value="30"></label>
+      <label>Timeout <input id="manage-timeout" type="number" min="1" max="3600" value="60"></label>
+      <button id="init-db" type="button">Init DB</button>
+      <button id="run-discover" class="primary" type="button">Run discover</button>
+      <button id="cancel-discover" type="button">Cancel</button>
+    </div>
+    <pre id="manage-status" class="muted"></pre>
+  </section>
 </main>
 <script>
+window.MH_UI = __MH_UI_CONFIG__;
 const text = (value) => value === null || value === undefined || value === "" ? "-" : String(value);
 const cell = (value) => {
   const td = document.createElement("td");
@@ -457,6 +977,17 @@ async function fetchJson(path) {
   const response = await fetch(path, {cache: "no-store"});
   if (!response.ok) throw new Error(path + " " + response.status);
   return response.json();
+}
+async function postManage(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    cache: "no-store",
+    headers: {"Content-Type": "application/json", "X-MH-UI-Token": window.MH_UI.token},
+    body: JSON.stringify(payload || {})
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || path + " " + response.status);
+  return body;
 }
 function renderSummary(summary) {
   const metrics = document.getElementById("metrics");
@@ -516,6 +1047,15 @@ function renderKnown(groups) {
 }
 function renderPlugins(payload) {
   const body = document.getElementById("plugins");
+  const select = document.getElementById("manage-plugin");
+  select.replaceChildren(...payload.plugins
+    .filter((plugin) => plugin.status === "valid" && plugin.id)
+    .map((plugin) => {
+      const option = document.createElement("option");
+      option.value = plugin.id;
+      option.textContent = plugin.id;
+      return option;
+    }));
   body.replaceChildren(...payload.plugins.map((plugin) => {
     const tr = document.createElement("tr");
     const status = document.createElement("td");
@@ -531,6 +1071,38 @@ function renderPlugins(payload) {
     return tr;
   }));
 }
+function managePayload() {
+  return {
+    plugin_id: document.getElementById("manage-plugin").value,
+    max_pages: Number(document.getElementById("manage-max-pages").value),
+    per_page: Number(document.getElementById("manage-per-page").value),
+    max_records: Number(document.getElementById("manage-max-records").value),
+    timeout_seconds: Number(document.getElementById("manage-timeout").value)
+  };
+}
+function renderManageStatus(value) {
+  document.getElementById("manage-status").textContent = JSON.stringify(value, null, 2);
+}
+async function refreshManageStatus() {
+  if (!window.MH_UI.manage) return;
+  renderManageStatus(await fetchJson("/api/manage/status"));
+}
+function wireManagement() {
+  if (!window.MH_UI.manage) return;
+  document.getElementById("management").hidden = false;
+  document.getElementById("init-db").onclick = async () => {
+    try { renderManageStatus(await postManage("/api/manage/init-db")); }
+    catch (error) { renderManageStatus({error: error.message}); }
+  };
+  document.getElementById("run-discover").onclick = async () => {
+    try { renderManageStatus(await postManage("/api/manage/discover", managePayload())); }
+    catch (error) { renderManageStatus({error: error.message}); }
+  };
+  document.getElementById("cancel-discover").onclick = async () => {
+    try { renderManageStatus(await postManage("/api/manage/cancel")); }
+    catch (error) { renderManageStatus({error: error.message}); }
+  };
+}
 async function boot() {
   const [summary, records, known, plugins] = await Promise.all([
     fetchJson("/api/summary"),
@@ -542,7 +1114,9 @@ async function boot() {
   renderRecords(records);
   renderKnown(known);
   renderPlugins(plugins);
-  document.getElementById("status").textContent = "read-only";
+  wireManagement();
+  await refreshManageStatus();
+  document.getElementById("status").textContent = window.MH_UI.manage ? "management" : "read-only";
 }
 boot().catch((error) => {
   document.getElementById("status").textContent = error.message;
@@ -619,8 +1193,91 @@ mod tests {
             db_path,
             plugins_dir,
             port: 0,
+            bound_port: 8765,
+            manage: false,
+            token: None,
+            run_state: Arc::new(Mutex::new(ManagementState::default())),
         };
         (dir, options)
+    }
+
+    fn request(method: &str, target: &str) -> HttpRequest {
+        let mut headers = BTreeMap::new();
+        headers.insert("host".to_string(), "127.0.0.1:8765".to_string());
+        HttpRequest {
+            method: method.to_string(),
+            target: target.to_string(),
+            headers,
+            body: Vec::new(),
+        }
+    }
+
+    fn management_options(db_path: PathBuf, plugins_dir: PathBuf) -> UiOptions {
+        UiOptions {
+            db_path,
+            plugins_dir,
+            port: 0,
+            bound_port: 8765,
+            manage: true,
+            token: Some("test-token".to_string()),
+            run_state: Arc::new(Mutex::new(ManagementState::default())),
+        }
+    }
+
+    fn management_request(method: &str, target: &str, token: &str, body: Value) -> HttpRequest {
+        let mut request = request(method, target);
+        request
+            .headers
+            .insert("origin".to_string(), "http://127.0.0.1:8765".to_string());
+        request
+            .headers
+            .insert("x-mh-ui-token".to_string(), token.to_string());
+        request.body = serde_json::to_vec(&body).unwrap();
+        request
+    }
+
+    fn python() -> String {
+        std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string())
+    }
+
+    fn write_plugin(dir: &std::path::Path, body: &str) {
+        let plugin = dir.join("plugin.py");
+        fs::write(&plugin, body).unwrap();
+        fs::write(
+            dir.join("synthetic.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": [python(), plugin.to_string_lossy().to_string()]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn discover_body() -> Value {
+        json!({
+            "plugin_id": "synthetic",
+            "max_pages": 1,
+            "per_page": 30,
+            "max_records": 30,
+            "timeout_seconds": 5
+        })
+    }
+
+    fn wait_for_last(options: &UiOptions) -> CompletedRun {
+        for _ in 0..80 {
+            if let Some(run) = options
+                .run_state
+                .lock()
+                .expect("management state poisoned")
+                .last
+                .clone()
+            {
+                return run;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("timed out waiting for UI run");
     }
 
     #[test]
@@ -638,18 +1295,20 @@ mod tests {
         assert_eq!(options.db_path, PathBuf::from("core.db"));
         assert_eq!(options.plugins_dir, PathBuf::from("plugins.d"));
         assert_eq!(options.port, 0);
+        assert!(!options.manage);
         assert!(parse_ui_options(&["--host".to_string(), "127.0.0.1".to_string()]).is_err());
         assert!(parse_ui_options(&["--bind".to_string(), "127.0.0.1".to_string()]).is_err());
-        assert!(parse_ui_options(&["--manage".to_string()]).is_err());
-        assert!(parse_ui_options(&[
+
+        let manage = parse_ui_options(&[
             "--db".to_string(),
             "core.db".to_string(),
             "--plugins-dir".to_string(),
             "plugins.d".to_string(),
             "--manage".to_string(),
-            "1".to_string(),
         ])
-        .is_err());
+        .unwrap();
+        assert!(manage.manage);
+        assert!(parse_ui_options(&["--manage".to_string(), "--manage".to_string()]).is_err());
     }
 
     #[test]
@@ -666,7 +1325,7 @@ mod tests {
         let (dir, options) = fixture();
         let before = fs::read(&options.db_path).unwrap();
 
-        let summary = handle_request(&options, "GET", "/api/summary");
+        let summary = handle_request(&options, &request("GET", "/api/summary"));
         assert_eq!(summary.status, 200);
         let summary_json: Value = serde_json::from_slice(&summary.body).unwrap();
         assert_eq!(summary_json["inspection"]["source_posts"], json!(1));
@@ -675,7 +1334,7 @@ mod tests {
             json!("synthetic")
         );
 
-        let records = handle_request(&options, "GET", "/api/records?limit=10&offset=0");
+        let records = handle_request(&options, &request("GET", "/api/records?limit=10&offset=0"));
         assert_eq!(records.status, 200);
         let records_json: Value = serde_json::from_slice(&records.body).unwrap();
         assert_eq!(
@@ -693,8 +1352,7 @@ mod tests {
 
         let state = handle_request(
             &options,
-            "GET",
-            "/api/state/known-source-urls?source_name=synthetic",
+            &request("GET", "/api/state/known-source-urls?source_name=synthetic"),
         );
         let state_json: Value = serde_json::from_slice(&state.body).unwrap();
         assert_eq!(state_json[0]["urls"][0], json!("synthetic://post/1"));
@@ -706,7 +1364,7 @@ mod tests {
     fn plugins_route_does_not_leak_env_values_or_local_paths() {
         let (dir, options) = fixture();
 
-        let response = handle_request(&options, "GET", "/api/plugins");
+        let response = handle_request(&options, &request("GET", "/api/plugins"));
         assert_eq!(response.status, 200);
         let body = String::from_utf8(response.body).unwrap();
 
@@ -723,7 +1381,7 @@ mod tests {
         let (dir, options) = fixture();
         let before = fs::read(&options.db_path).unwrap();
 
-        let response = handle_request(&options, "POST", "/api/summary");
+        let response = handle_request(&options, &request("POST", "/api/summary"));
 
         assert_eq!(response.status, 405);
         assert_eq!(
@@ -739,10 +1397,345 @@ mod tests {
     }
 
     #[test]
+    fn management_guard_blocks_missing_or_cross_origin_authority() {
+        let (dir, read_only) = fixture();
+        let options = management_options(read_only.db_path.clone(), read_only.plugins_dir.clone());
+        let before = fs::read(&options.db_path).unwrap();
+
+        let disabled = handle_request(
+            &read_only,
+            &management_request("POST", "/api/manage/init-db", "test-token", json!({})),
+        );
+        assert_eq!(disabled.status, 403);
+
+        let get = handle_request(
+            &options,
+            &management_request("GET", "/api/manage/init-db", "test-token", json!({})),
+        );
+        assert_eq!(get.status, 405);
+
+        let missing_token = handle_request(&options, &request("POST", "/api/manage/init-db"));
+        assert_eq!(missing_token.status, 403);
+
+        let mut bad_host =
+            management_request("POST", "/api/manage/init-db", "test-token", json!({}));
+        bad_host
+            .headers
+            .insert("host".to_string(), "example.test:8765".to_string());
+        assert_eq!(handle_request(&options, &bad_host).status, 403);
+
+        let mut bad_origin =
+            management_request("POST", "/api/manage/init-db", "test-token", json!({}));
+        bad_origin
+            .headers
+            .insert("origin".to_string(), "http://example.test".to_string());
+        assert_eq!(handle_request(&options, &bad_origin).status, 403);
+
+        for response in [disabled, get, missing_token] {
+            assert!(!response
+                .extra_headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("access-control-allow-origin")));
+        }
+        assert_eq!(fs::read(&options.db_path).unwrap(), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn guarded_init_db_initializes_empty_database() {
+        let dir = temp_dir("manage-init");
+        let db_path = dir.join("core.db");
+        let plugins_dir = dir.join("plugins.d");
+        fs::create_dir(&plugins_dir).unwrap();
+        let options = management_options(db_path.clone(), plugins_dir);
+
+        let response = handle_request(
+            &options,
+            &management_request("POST", "/api/manage/init-db", "test-token", json!({})),
+        );
+
+        assert_eq!(response.status, 200);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["inspection"]["schema_version"], json!(1));
+        assert!(db_path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn guarded_discover_requires_explicit_bounds_and_ingests() {
+        let dir = temp_dir("manage-discover");
+        let db_path = dir.join("core.db");
+        let plugins_dir = dir.join("plugins.d");
+        fs::create_dir(&plugins_dir).unwrap();
+        write_plugin(
+            &plugins_dir,
+            r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({"jsonrpc": "2.0", "id": init["id"], "result": {
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }
+}})
+discover = read_frame()
+limits = discover["params"]["limits"]
+if limits != {"max_pages": 1, "max_records": 30, "per_page": 30}:
+    write_frame({"jsonrpc": "2.0", "id": discover["id"], "error": {
+        "code": -32000,
+        "message": "unexpected limits"
+    }})
+    raise SystemExit(0)
+record = {
+    "source_name": "synthetic",
+    "source_url": "synthetic://ui/1",
+    "title": "UI managed record",
+    "brand_raw": "Synthetic Brand",
+    "performers_raw": [],
+    "cover_urls": [],
+    "page_urls": [],
+    "external_links": []
+}
+write_frame({"jsonrpc": "2.0", "method": "record", "params": {"request_id": discover["params"]["request_id"], "record": record}})
+write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 1}})
+"#,
+        );
+        let options = management_options(db_path.clone(), plugins_dir);
+
+        let mut missing_bound = discover_body();
+        missing_bound.as_object_mut().unwrap().remove("max_records");
+        assert_eq!(
+            handle_request(
+                &options,
+                &management_request("POST", "/api/manage/discover", "test-token", missing_bound,),
+            )
+            .status,
+            400
+        );
+        for key in ["max_pages", "per_page", "max_records", "timeout_seconds"] {
+            for invalid in [json!(0), json!(-1), json!("1")] {
+                let mut body = discover_body();
+                body.as_object_mut()
+                    .unwrap()
+                    .insert(key.to_string(), invalid);
+                assert_eq!(
+                    handle_request(
+                        &options,
+                        &management_request("POST", "/api/manage/discover", "test-token", body,),
+                    )
+                    .status,
+                    400,
+                    "{key} should reject invalid value"
+                );
+            }
+        }
+        for (key, invalid) in [
+            ("max_pages", MAX_MANAGE_DISCOVER_PAGES + 1),
+            ("per_page", MAX_MANAGE_DISCOVER_PER_PAGE + 1),
+            ("max_records", MAX_MANAGE_DISCOVER_RECORDS + 1),
+            ("timeout_seconds", MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS + 1),
+        ] {
+            let mut body = discover_body();
+            body.as_object_mut()
+                .unwrap()
+                .insert(key.to_string(), json!(invalid));
+            assert_eq!(
+                handle_request(
+                    &options,
+                    &management_request("POST", "/api/manage/discover", "test-token", body,),
+                )
+                .status,
+                400,
+                "{key} should reject values above the UI cap"
+            );
+        }
+
+        let response = handle_request(
+            &options,
+            &management_request(
+                "POST",
+                "/api/manage/discover",
+                "test-token",
+                discover_body(),
+            ),
+        );
+        assert_eq!(response.status, 202);
+        let completed = wait_for_last(&options);
+        assert_eq!(completed.status, "succeeded");
+        assert_eq!(completed.result["ingested_records"], json!(1));
+
+        let summary = handle_request(&options, &request("GET", "/api/summary"));
+        let summary_json: Value = serde_json::from_slice(&summary.body).unwrap();
+        assert_eq!(summary_json["inspection"]["source_posts"], json!(1));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn guarded_cancel_only_targets_active_ui_discover() {
+        let dir = temp_dir("manage-cancel");
+        let db_path = dir.join("core.db");
+        let plugins_dir = dir.join("plugins.d");
+        let cancel_file = dir.join("cancel.seen");
+        let ready_file = dir.join("discover.ready");
+        fs::create_dir(&plugins_dir).unwrap();
+        write_plugin(
+            &plugins_dir,
+            &format!(
+                r#"
+import json
+import struct
+import sys
+import time
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({{"jsonrpc": "2.0", "id": init["id"], "result": {{
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {{
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }}
+}}}})
+discover = read_frame()
+with open({ready_file:?}, "w") as f:
+    f.write(discover["params"]["request_id"])
+cancel = read_frame()
+if cancel.get("method") == "cancel":
+    with open({cancel_file:?}, "w") as f:
+        f.write(cancel["params"]["request_id"])
+time.sleep(0.05)
+"#
+            ),
+        );
+        let options = management_options(db_path.clone(), plugins_dir);
+
+        assert_eq!(
+            handle_request(
+                &options,
+                &management_request("POST", "/api/manage/cancel", "test-token", json!({})),
+            )
+            .status,
+            409
+        );
+
+        let response = handle_request(
+            &options,
+            &management_request(
+                "POST",
+                "/api/manage/discover",
+                "test-token",
+                discover_body(),
+            ),
+        );
+        assert_eq!(response.status, 202);
+        for _ in 0..80 {
+            if ready_file.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(ready_file.exists());
+        let second = handle_request(
+            &options,
+            &management_request(
+                "POST",
+                "/api/manage/discover",
+                "test-token",
+                discover_body(),
+            ),
+        );
+        assert_eq!(second.status, 409);
+        let wrong_run = handle_request(
+            &options,
+            &management_request(
+                "POST",
+                "/api/manage/cancel",
+                "test-token",
+                json!({"run_id": "not-the-active-run"}),
+            ),
+        );
+        assert_eq!(wrong_run.status, 404);
+        let cancel = handle_request(
+            &options,
+            &management_request("POST", "/api/manage/cancel", "test-token", json!({})),
+        );
+        assert_eq!(cancel.status, 202);
+        let completed = wait_for_last(&options);
+        assert_eq!(completed.status, "cancelled");
+        assert!(fs::read_to_string(&cancel_file).unwrap().starts_with("ui-"));
+        assert_eq!(Database::inspect_path(&db_path).unwrap().source_posts, 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn accepted_cancel_before_ingest_keeps_spooled_records_out_of_db() {
+        let cancel_token = CancellationToken::new();
+        let run_state = Arc::new(Mutex::new(ManagementState {
+            active: Some(ActiveRun {
+                run_id: "ui-spooled".to_string(),
+                plugin_id: "synthetic".to_string(),
+                started_at: 0,
+                cancel_token: cancel_token.clone(),
+                cancellable: true,
+            }),
+            last: None,
+        }));
+
+        cancel_token.cancel();
+
+        let err = mark_run_ingesting(&run_state, "ui-spooled", &cancel_token).unwrap_err();
+        assert!(matches!(err, HostError::Cancelled));
+        assert!(
+            run_state
+                .lock()
+                .unwrap()
+                .active
+                .as_ref()
+                .unwrap()
+                .cancellable
+        );
+    }
+
+    #[test]
     fn head_request_reuses_get_routes_without_body() {
         let (dir, options) = fixture();
 
-        let response = handle_request(&options, "HEAD", "/");
+        let response = handle_request(&options, &request("HEAD", "/"));
 
         assert_eq!(response.status, 200);
         assert!(response.body.is_empty());

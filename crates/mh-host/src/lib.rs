@@ -476,6 +476,26 @@ pub struct PluginHost {
     shutdown_grace: Duration,
 }
 
+/// Cooperative cancellation handle for a running discover operation.
+#[derive(Clone, Debug, Default)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+}
+
 const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 impl Default for PluginHost {
@@ -533,6 +553,29 @@ impl PluginHost {
         )
     }
 
+    /// Run discovery with a typed state provider and cooperative cancellation.
+    pub fn run_discover_with_state_provider_and_cancel(
+        &self,
+        plugin: &PluginDefinition,
+        request_id: &str,
+        limits: DiscoverLimits,
+        timeout: Duration,
+        state_provider: &dyn StateProvider,
+        cancel_token: &CancellationToken,
+    ) -> Result<HostRun, HostError> {
+        self.run_discover_with_providers_and_cancel(
+            plugin,
+            request_id,
+            limits,
+            timeout,
+            RunProviders {
+                state_provider,
+                fetch_provider: &SafeFetchProvider::default(),
+                cancel_token: Some(cancel_token),
+            },
+        )
+    }
+
     /// Run discovery with typed state and safe fetch providers.
     fn run_discover_with_providers(
         &self,
@@ -542,6 +585,27 @@ impl PluginHost {
         timeout: Duration,
         state_provider: &dyn StateProvider,
         fetch_provider: &dyn FetchProvider,
+    ) -> Result<HostRun, HostError> {
+        self.run_discover_with_providers_and_cancel(
+            plugin,
+            request_id,
+            limits,
+            timeout,
+            RunProviders {
+                state_provider,
+                fetch_provider,
+                cancel_token: None,
+            },
+        )
+    }
+
+    fn run_discover_with_providers_and_cancel(
+        &self,
+        plugin: &PluginDefinition,
+        request_id: &str,
+        limits: DiscoverLimits,
+        timeout: Duration,
+        providers: RunProviders<'_>,
     ) -> Result<HostRun, HostError> {
         let effective_limits = limits.with_host_caps();
         let deadline = Instant::now()
@@ -563,9 +627,10 @@ impl PluginHost {
                 request_id,
                 manifest: None,
                 state: &mut state,
-                state_provider,
-                fetch_provider,
+                state_provider: providers.state_provider,
+                fetch_provider: providers.fetch_provider,
                 deadline,
+                cancel_token: providers.cancel_token,
             },
         )?;
         let init: InitializeResult = serde_json::from_value(init_value).map_err(HostError::Json)?;
@@ -604,9 +669,10 @@ impl PluginHost {
                 request_id,
                 manifest: Some(&init.manifest),
                 state: &mut state,
-                state_provider,
-                fetch_provider,
+                state_provider: providers.state_provider,
+                fetch_provider: providers.fetch_provider,
                 deadline,
+                cancel_token: providers.cancel_token,
             },
         )?;
         let discover: DiscoverResult =
@@ -643,8 +709,16 @@ impl PluginHost {
         mut context: LoopContext<'_, '_>,
     ) -> Result<Value, HostError> {
         loop {
-            let payload = match process.recv_frame(deadline) {
+            if context.is_cancelled() {
+                let _ = process.send_cancel(context.request_id);
+                let _ = process.wait_or_terminate(self.shutdown_grace);
+                return Err(HostError::Cancelled);
+            }
+            let payload = match process.recv_frame(context.recv_deadline(deadline)) {
                 Ok(payload) => payload,
+                Err(HostError::Timeout) if context.should_continue_after_poll_timeout(deadline) => {
+                    continue;
+                }
                 Err(HostError::Timeout) => {
                     let _ = process.send_cancel(context.request_id);
                     let _ = process.wait_or_terminate(self.shutdown_grace);
@@ -882,6 +956,12 @@ impl PluginHost {
     }
 }
 
+struct RunProviders<'a> {
+    state_provider: &'a dyn StateProvider,
+    fetch_provider: &'a dyn FetchProvider,
+    cancel_token: Option<&'a CancellationToken>,
+}
+
 struct LoopContext<'a, 'b> {
     request_id: &'a str,
     manifest: Option<&'a PluginManifest>,
@@ -889,6 +969,27 @@ struct LoopContext<'a, 'b> {
     state_provider: &'a dyn StateProvider,
     fetch_provider: &'a dyn FetchProvider,
     deadline: Instant,
+    cancel_token: Option<&'a CancellationToken>,
+}
+
+impl LoopContext<'_, '_> {
+    fn is_cancelled(&self) -> bool {
+        self.cancel_token
+            .map(CancellationToken::is_cancelled)
+            .unwrap_or(false)
+    }
+
+    fn recv_deadline(&self, deadline: Instant) -> Instant {
+        if self.cancel_token.is_none() {
+            return deadline;
+        }
+        let poll_deadline = Instant::now() + Duration::from_millis(50);
+        poll_deadline.min(deadline)
+    }
+
+    fn should_continue_after_poll_timeout(&self, deadline: Instant) -> bool {
+        self.cancel_token.is_some() && Instant::now() < deadline
+    }
 }
 
 struct RunState {
@@ -1181,6 +1282,7 @@ pub enum HostError {
     FrameQueueFull,
     Protocol(String),
     State(StateError),
+    Cancelled,
     Timeout,
     Validation(mh_domain::ValidationError),
 }
@@ -1209,6 +1311,7 @@ impl std::fmt::Display for HostError {
             HostError::FrameQueueFull => write!(f, "plugin frame queue exceeded host limit"),
             HostError::Protocol(err) => write!(f, "protocol error: {err}"),
             HostError::State(err) => write!(f, "state provider error: {err}"),
+            HostError::Cancelled => write!(f, "plugin discover was cancelled"),
             HostError::Timeout => write!(f, "plugin timed out"),
             HostError::Validation(err) => write!(f, "record validation error: {err}"),
         }
@@ -3009,6 +3112,97 @@ if cancel.get("method") == "cancel":
 
         assert!(matches!(result, Err(HostError::Timeout)));
         assert_eq!(fs::read_to_string(&cancel_file).unwrap(), "run-cancel");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn external_cancel_token_sends_cancel_before_terminating() {
+        let dir = temp_dir("external-cancel");
+        let ready_file = dir.join("discover.ready");
+        let cancel_file = dir.join("cancel.seen");
+        let plugin = write_plugin(
+            &dir,
+            &format!(
+                r#"
+import json
+import struct
+import sys
+import time
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({{"jsonrpc": "2.0", "id": init["id"], "result": {{
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {{
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": [],
+        "capabilities": []
+    }}
+}}}})
+
+discover = read_frame()
+with open({ready_file:?}, "w") as f:
+    f.write(discover["params"]["request_id"])
+cancel = read_frame()
+if cancel.get("method") == "cancel":
+    with open({cancel_file:?}, "w") as f:
+        f.write(cancel["params"]["request_id"])
+time.sleep(0.05)
+"#
+            ),
+        );
+        let python = python();
+        write_manifest(
+            &dir,
+            "synthetic",
+            &[python.clone(), plugin.to_string_lossy().to_string()],
+        );
+        let plugins = discover_plugins(&dir).unwrap();
+        let cancel_token = CancellationToken::new();
+        let canceller = {
+            let ready_file = ready_file.clone();
+            let cancel_token = cancel_token.clone();
+            thread::spawn(move || {
+                for _ in 0..80 {
+                    if ready_file.exists() {
+                        cancel_token.cancel();
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                panic!("plugin did not enter discover phase");
+            })
+        };
+
+        let result = PluginHost::default().run_discover_with_state_provider_and_cancel(
+            &plugins[0],
+            "run-external-cancel",
+            DiscoverLimits::default(),
+            Duration::from_secs(5),
+            &NoStateProvider,
+            &cancel_token,
+        );
+
+        canceller.join().unwrap();
+        assert!(matches!(result, Err(HostError::Cancelled)));
+        assert_eq!(
+            fs::read_to_string(&cancel_file).unwrap(),
+            "run-external-cancel"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

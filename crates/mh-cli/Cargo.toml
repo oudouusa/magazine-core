@@ -11,6 +11,7 @@ name = "mh"
 path = "src/main.rs"
 
 [dependencies]
+getrandom = "0.2"
 mh-db = { workspace = true }
 mh-host = { workspace = true }
 serde_json = { workspace = true }
