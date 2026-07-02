@@ -28,6 +28,9 @@ The script performs:
   shapes.
 - SHA256 generation for release artifacts (`checksums.sha256` and the public
   release asset name `SHA256SUMS.txt`).
+- Version discipline check for Cargo package versions, the Python SDK project
+  metadata that determines wheel versioning, and release tag / changelog /
+  release-note agreement when a version tag is provided.
 - Markdown report generation under `dist/release-hardening/`.
 
 `dist/` is ignored because the generated artifacts are release outputs, not
@@ -39,6 +42,8 @@ For repeatable pre-beta evidence, run the manual `Release hardening` workflow.
 It executes the same script on Ubuntu and macOS and uploads the report, binary
 tarball, Python wheel, CycloneDX SBOM, checksum file, dependency inventory,
 license inventory, and secret scan output.
+It also uploads `version-discipline.json`, which records the package version
+and whether a version tag was compared.
 
 To publish the Linux downstream-consumable assets to an existing GitHub
 Release, create the tag/Release so it targets the same commit as the workflow
@@ -54,6 +59,17 @@ uploads:
 The publish step verifies the checksum file and refuses to upload if the
 Release target commit differs from the checked-out commit. Leave `release_tag`
 empty for hardening-only runs.
+
+When `release_tag` looks like a release version such as `0.1.0-beta.3`,
+release hardening also requires all Cargo packages, the Python SDK version
+source from `sdk/python/pyproject.toml` after PEP 440 normalization,
+`CHANGELOG.md`, and `docs/release/<tag>.md` to agree with that tag.
+Non-version refs such as `main` still verify package metadata consistency but
+skip tag-specific changelog and release-note checks.
+Historical beta releases that intentionally documented metadata drift, such as
+`0.1.0-beta.2`, remain consumable as already-published GitHub Release assets,
+but rerunning publish hardening for that tag is intentionally blocked until the
+tag, packages, changelog, and release notes agree.
 
 For the beta line, these GitHub Release assets are the authoritative
 distribution channel. `cargo install`, PyPI, and Docker are deferred channels

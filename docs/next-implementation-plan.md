@@ -115,8 +115,9 @@ canonical DB schema:
 2. Completed in the current distribution-channel decision slice: GitHub Release
    artifacts are the beta source of truth; `cargo install`, PyPI, and Docker
    are deferred until their cost/benefit justifies another release surface.
-3. Lock version discipline so binary, wheel, tag, and CHANGELOG agree and
-   release hardening verifies that agreement.
+3. Completed in the current version-discipline slice: release hardening checks
+   Cargo package versions, Python SDK project metadata, and release tag /
+   changelog / release-note agreement for version tags.
 4. Add a cold-start check in a clean environment or CI.
 
 ## Maintainer Product Scope (contract-neutral)

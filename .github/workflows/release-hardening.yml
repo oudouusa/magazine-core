@@ -72,6 +72,7 @@ jobs:
             dist/release-hardening/release-hardening-report.md
             dist/release-hardening/artifacts/*
             dist/release-hardening/dependency-inventory.json
+            dist/release-hardening/version-discipline.json
             dist/release-hardening/license-inventory.txt
             dist/release-hardening/secret-scan.txt
             dist/release-hardening/secret-history-scan.txt
