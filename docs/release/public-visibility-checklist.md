@@ -6,8 +6,9 @@ gates and verification steps without any deployment-specific operational detail.
 ## Pre-release gate
 
 - [ ] `main` is clean; no open PRs that must ship first.
-- [ ] `protocol_version = 1` and `record_schema_version = 1` are unchanged and
-      consistent across `docs/protocol-v1.md`, the Rust host, and the Python SDK.
+- [ ] For the current `1.0` / `1.x` line, `protocol_version = 1` and
+      `record_schema_version = 1` are unchanged and consistent across
+      `docs/protocol-v1.md`, the Rust host, and the Python SDK.
 - [ ] Golden fixtures match the Python oracle (`bash conformance/check_golden.sh`).
 - [ ] Release hardening is green on supported platforms
       (`bash scripts/release-hardening.sh`, or the manual `Release hardening`
@@ -48,9 +49,10 @@ with fewer guarantees, but it must not claim stable status.
       synthetic DB locally, default management is disabled, `--manage` is
       guarded, and release hardening covers the UI smoke for UI-capable
       artifacts.
-- [ ] Post-`1.0.0` compatibility policy is documented before tagging,
-      including how additive changes, deprecations, and compatibility windows
-      are handled.
+- [ ] Post-`1.0.0` compatibility policy is documented in
+      `docs/compatibility-policy.md`, including how additive changes,
+      deprecations, breaking changes, security exceptions, and compatibility
+      windows are handled.
 - [ ] Version discipline is green for `1.0.0`: Cargo package metadata, Python
       SDK project metadata, `CHANGELOG.md`, `docs/release/1.0.0.md`, and the
       GitHub Release tag agree.

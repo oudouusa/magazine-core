@@ -42,6 +42,7 @@ Conformance inventory evidence is tracked in `docs/conformance-fixture-inventory
 `1.0.0` readiness is not a downstream adapter checklist. It is a release gate
 for the public upstream and is tracked in
 `docs/release/public-visibility-checklist.md` section `1.0.0 Eligibility Gate`.
+The post-`1.0.0` compatibility policy is `docs/compatibility-policy.md`.
 Downstream lock updates after a stable tag still follow the same deliberate
 pinning rules and must state whether `protocol_version` or
 `record_schema_version` changed.

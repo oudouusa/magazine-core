@@ -201,6 +201,8 @@ Do not patch a copy of core logic inside a private downstream consumer.
 ## 8. Versioning and locking
 
 `magazine-core` controls public versioning.
+After `1.0.0`, public compatibility is governed by
+`docs/compatibility-policy.md`.
 
 Private downstream consumers pin the exact core version or commit in their own lock files.
 
@@ -217,7 +219,8 @@ Rules:
 ## 9. Contract stability
 
 Current public release status belongs in `README.md` and GitHub Releases, not
-in this contract. The stable contract identifiers are:
+in this contract. For the current `1.0` / `1.x` line, the stable contract
+identifiers are:
 
 ```text
 protocol_version = 1

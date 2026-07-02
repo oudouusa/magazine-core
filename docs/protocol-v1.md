@@ -10,7 +10,8 @@ gap が出たため、`protocol_version = 1` の optional limits として `max_
 `max_records` / `per_page` を明文化した。`record_schema_version = 1` は変更しない。
 conformance fixture inventory は typed state、discover limits、non-empty `page_urls`
 の golden coverage を含む。Python SDK の plugin-author API tier は
-`docs/python-sdk.md` を参照する。
+`docs/python-sdk.md` を参照する。post-`1.0.0` の互換性ルールは
+`docs/compatibility-policy.md` を参照する。
 
 ## 1. transport と framing
 

@@ -97,3 +97,4 @@ cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 -
 - `docs/python-sdk.md` — Python SDK stable root API and advanced API tiers
 - `docs/migration-checklist.md` — downstream adapter migration and beta-readiness checklist
 - `docs/release/public-visibility-checklist.md` — public release and `1.0.0` eligibility gate
+- `docs/compatibility-policy.md` — post-`1.0.0` compatibility policy

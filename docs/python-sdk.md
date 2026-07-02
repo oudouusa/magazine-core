@@ -5,7 +5,8 @@ This document defines the Python SDK API tier for `protocol_version = 1` and
 
 The SDK is a convenience layer for writing trusted plugins that speak
 `protocol_version = 1` over framed stdin/stdout. It does not change the wire
-contract in `docs/protocol-v1.md`.
+contract in `docs/protocol-v1.md`. Post-`1.0.0` compatibility for the root API
+is governed by `docs/compatibility-policy.md`.
 
 ## Stable Plugin-Author API
 
