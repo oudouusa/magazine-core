@@ -71,7 +71,7 @@ or a stable tag is implied without evidence.
 
 ## Residual Risks
 
-- The post-`1.0.0` compatibility policy is required by the gate but still needs
-  a dedicated C7 slice.
-- The stable tag decision itself remains open; this slice only defines the
-  criteria.
+- The post-`1.0.0` compatibility policy was later documented in
+  `docs/development/1-0-compatibility-policy-evidence-2026-07-02.md`.
+- The stable tag decision was later recorded in
+  `docs/development/1-0-stable-tag-decision-2026-07-02.md`: do not cut yet.
