@@ -103,9 +103,9 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: Standalone Distribution
+## Current Priority: Admin/viewer UI
 
-Next bounded work starts the maintainer-approved product scope without changing
+Current bounded work continues the maintainer-approved product scope without changing
 `protocol_version`, `record_schema_version`, the Python SDK root API, or the
 canonical DB schema:
 
@@ -121,6 +121,14 @@ canonical DB schema:
 4. Completed in the current cold-start slice: release-tag hardening dispatches
    run a Linux standalone cold-start job after publishing public GitHub Release
    assets, using only the Release URL, checksum file, binary tarball, and wheel.
+5. Completed in the current admin/viewer UI ADR slice:
+   `docs/development/admin-viewer-ui-adr-2026-07-02.md` accepts a bundled local
+   web UI served by `mh ui`, with `127.0.0.1` bind, read-only default, explicit
+   `--manage` opt-in plus request-level protection for mutating operations, no
+   runtime Node dependency, and no protocol / SDK root API / canonical schema
+   change.
+6. Next: implement the v1 read-only viewer for core DB summary, source record
+   browsing, typed `known_source_urls` state, and `plugins.d` manifest listing.
 
 ## Maintainer Product Scope (contract-neutral)
 
@@ -133,8 +141,9 @@ Python SDK root API, or the canonical DB schema:
   artifacts alone, verified with a cold-start check in a clean environment.
 - **Admin/viewer UI**: a bundled local web UI, ADR first. Defaults:
   `127.0.0.1` bind and read-only; mutating operations (`init-db`, bounded
-  `discover`, run cancel) require an explicit opt-in flag; no runtime Node
-  dependency in the distribution.
+  `discover`, run cancel) require an explicit opt-in flag and request-level
+  protection; no runtime Node dependency in the distribution. The accepted ADR
+  is `docs/development/admin-viewer-ui-adr-2026-07-02.md`.
 
 ## 1.0 Criteria (to be formalized)
 
