@@ -1,0 +1,11 @@
+profile_version = 1
+source_name = "my_wordpress"
+display_label = "My WordPress"
+base_url = "https://example.com"
+allowed_domains = ["example.com"]
+endpoint = "/wp-json/wp/v2/posts"
+category_ids = []
+default_per_page = 20
+default_max_pages = 1
+default_max_records = 20
+brand_raw = "Example WordPress"

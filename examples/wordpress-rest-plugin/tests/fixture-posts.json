@@ -1,0 +1,44 @@
+[
+  {
+    "id": 101,
+    "date": "2026-01-02T03:04:05",
+    "slug": "synthetic-one",
+    "link": "https://example.invalid/posts/synthetic-one",
+    "title": {
+      "rendered": "<span>Synthetic</span> &amp; One"
+    },
+    "content": {
+      "rendered": "<p>Intro</p><img src=\"https://example.invalid/media/synthetic-one.jpg\" alt=\"cover\">"
+    },
+    "categories": [10, 20],
+    "tags": [30]
+  },
+  {
+    "id": 102,
+    "date": "2026-01-03T04:05:06",
+    "slug": "synthetic-two",
+    "link": "https://example.invalid/posts/synthetic-two",
+    "title": {
+      "rendered": "Synthetic <strong>Two</strong>"
+    },
+    "content": {
+      "rendered": "<p>No cover image here.</p>"
+    },
+    "categories": [],
+    "tags": [31, 32]
+  },
+  {
+    "id": 103,
+    "date": "2026-01-04",
+    "slug": "synthetic-three",
+    "link": "https://example.invalid/posts/synthetic-three",
+    "title": {
+      "rendered": "Synthetic Three"
+    },
+    "content": {
+      "rendered": "<p><img src=\"https://example.invalid/media/one.jpg\"><img src=\"https://example.invalid/media/two.jpg\"></p>"
+    },
+    "categories": [21],
+    "tags": []
+  }
+]
