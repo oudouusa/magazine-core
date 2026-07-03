@@ -85,8 +85,13 @@ host_fetch の安全方針:
 - method は `GET` / `HEAD` のみ。
 - `manifest.allowed_domains` を強制する。host は exact host またはその subdomain だけを許可する。
 - redirect は host が追跡し、各 hop で scheme / allowed_domains / DNS IP を再検査する。
-- DNS 解決後の IP 検査で localhost / private / link-local / multicast / unspecified /
+- DNS 解決後の IP 検査は既定で localhost / private / link-local / multicast / unspecified /
   carrier-grade NAT / IPv6 unique-local を拒否する。許可domainでもこの拒否は上書きできない。
+  `mh discover --dev-allow-loopback-fetch` は local synthetic smoke 用の明示 opt-in で、
+  loopback（IPv4 `127.0.0.0/8`、IPv6 `::1`、IPv4-mapped loopback）のみをこの IP
+  検査で許可する。dev 専用であり production で使ってはならない。private /
+  link-local / carrier-grade NAT / IPv6 unique-local / multicast 等はこの opt-in
+  有効時も拒否し、redirect の各 hop でも同じ規則を適用する。
 - system proxy は明示的に無効化する。
 - connect / total timeout を持ち、body read は total timeout に含める。
 - raw response body 上限は 5 MiB。base64 expansion と JSON envelope を含めて protocol frame
@@ -151,6 +156,10 @@ JSON-RPC error とし、空配列や null を「既知 state なし」の代替�
 
 - `host_fetch`（既定）: host が通信し上記安全方針を強制する。
 - `self_fetch`（trusted plugin のみ・既定 off）: plugin 自身が通信する。
+
+`--dev-allow-loopback-fetch` は wire protocol ではなく `mh discover` operator flag であり、
+`protocol_version` / `record_schema_version` / golden fixture には影響しない。plugin manifest や
+site profile からこの opt-in を有効化することはできない。
 
 ## 9. trust model
 

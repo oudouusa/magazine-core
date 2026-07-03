@@ -247,6 +247,23 @@ impl SafeFetcher {
     ) -> Result<FetchResponse, FetchError> {
         self.inner.fetch(request, policy)
     }
+
+    /// Fetch with an explicit development-only loopback address allowance.
+    ///
+    /// This keeps scheme, manifest domain, redirect, header, timeout, and size
+    /// checks unchanged. Only IPv4/IPv6 loopback resolved addresses are allowed
+    /// through the DNS IP rejection step.
+    pub fn fetch_with_dev_loopback_allowance(
+        &self,
+        request: FetchRequest,
+        policy: &FetchPolicy,
+    ) -> Result<FetchResponse, FetchError> {
+        self.inner.fetch_with_address_policy(
+            request,
+            policy,
+            ResolvedAddressPolicy::DevAllowLoopback,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -271,6 +288,15 @@ impl<R: Resolver, T: Transport> SafeFetcherParts<R, T> {
         request: FetchRequest,
         policy: &FetchPolicy,
     ) -> Result<FetchResponse, FetchError> {
+        self.fetch_with_address_policy(request, policy, ResolvedAddressPolicy::Default)
+    }
+
+    fn fetch_with_address_policy(
+        &self,
+        request: FetchRequest,
+        policy: &FetchPolicy,
+        address_policy: ResolvedAddressPolicy,
+    ) -> Result<FetchResponse, FetchError> {
         let method = FetchMethod::parse(&request.method)?;
         validate_headers(&request.headers)?;
         let mut url = Url::parse(&request.url)
@@ -288,7 +314,12 @@ impl<R: Resolver, T: Transport> SafeFetcherParts<R, T> {
                 .ok_or_else(|| FetchError::Policy("fetch URL missing port".to_string()))?;
             let dns_timeout = policy.connect_timeout.min(remaining);
             let addrs = self.resolver.resolve(host, port, dns_timeout)?;
-            validate_resolved_addrs(&addrs)?;
+            match address_policy {
+                ResolvedAddressPolicy::Default => validate_resolved_addrs(&addrs)?,
+                ResolvedAddressPolicy::DevAllowLoopback => {
+                    validate_resolved_addrs_with_policy(&addrs, address_policy)?;
+                }
+            }
             let remaining = remaining_timeout(started, policy.total_timeout)?;
             let response = self.transport.send(TransportRequest {
                 url: &url,
@@ -331,6 +362,12 @@ impl<R: Resolver, T: Transport> SafeFetcherParts<R, T> {
             limit: policy.max_redirects,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolvedAddressPolicy {
+    Default,
+    DevAllowLoopback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -402,11 +439,18 @@ fn validate_headers(headers: &BTreeMap<String, String>) -> Result<(), FetchError
 }
 
 fn validate_resolved_addrs(addrs: &[SocketAddr]) -> Result<(), FetchError> {
+    validate_resolved_addrs_with_policy(addrs, ResolvedAddressPolicy::Default)
+}
+
+fn validate_resolved_addrs_with_policy(
+    addrs: &[SocketAddr],
+    address_policy: ResolvedAddressPolicy,
+) -> Result<(), FetchError> {
     if addrs.is_empty() {
         return Err(FetchError::Policy("DNS returned no addresses".to_string()));
     }
     for addr in addrs {
-        if forbidden_ip(addr.ip()) {
+        if forbidden_ip_for_policy(addr.ip(), address_policy) {
             return Err(FetchError::Policy(format!(
                 "resolved IP {} is not allowed",
                 addr.ip()
@@ -472,6 +516,25 @@ fn forbidden_ip(ip: IpAddr) -> bool {
                 || ip.is_multicast()
                 || ip.is_unique_local()
                 || ip.is_unicast_link_local()
+        }
+    }
+}
+
+fn forbidden_ip_for_policy(ip: IpAddr, address_policy: ResolvedAddressPolicy) -> bool {
+    match address_policy {
+        ResolvedAddressPolicy::Default => forbidden_ip(ip),
+        ResolvedAddressPolicy::DevAllowLoopback => forbidden_ip(ip) && !loopback_ip(ip),
+    }
+}
+
+fn loopback_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_loopback(),
+        IpAddr::V6(ip) => {
+            ip.is_loopback()
+                || ip
+                    .to_ipv4_mapped()
+                    .is_some_and(|mapped| mapped.is_loopback())
         }
     }
 }
@@ -745,6 +808,144 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("resolved IP"));
+    }
+
+    #[test]
+    fn dev_loopback_allowance_permits_only_loopback_addresses() {
+        for (host, url, ip) in [
+            (
+                "localhost",
+                "http://localhost/page",
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            ),
+            (
+                "v6.example.test",
+                "http://v6.example.test/page",
+                "::1".parse().unwrap(),
+            ),
+            (
+                "mapped.example.test",
+                "http://mapped.example.test/page",
+                "::ffff:127.0.0.1".parse().unwrap(),
+            ),
+        ] {
+            let fetcher = SafeFetcherParts::with_parts(
+                FakeResolver::new(&[(host, ip)]),
+                FakeTransport::new(&[(
+                    url,
+                    TransportResponse {
+                        status: 200,
+                        location: None,
+                        body: b"ok".to_vec(),
+                    },
+                )]),
+            );
+
+            let response = fetcher
+                .fetch_with_address_policy(
+                    FetchRequest {
+                        url: url.to_string(),
+                        method: "GET".to_string(),
+                        headers: BTreeMap::new(),
+                    },
+                    &policy(&[host]),
+                    ResolvedAddressPolicy::DevAllowLoopback,
+                )
+                .unwrap();
+
+            assert_eq!(response.status, 200);
+        }
+
+        for ip in [
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)),
+            IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1)),
+            "::ffff:10.0.0.1".parse().unwrap(),
+            "fc00::1".parse().unwrap(),
+            "fe80::1".parse().unwrap(),
+        ] {
+            let err = validate_resolved_addrs_with_policy(
+                &[SocketAddr::new(ip, 80)],
+                ResolvedAddressPolicy::DevAllowLoopback,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("resolved IP"),
+                "{ip} should remain forbidden"
+            );
+        }
+    }
+
+    #[test]
+    fn dev_loopback_allowance_still_requires_allowed_domains() {
+        let fetcher = SafeFetcherParts::with_parts(
+            FakeResolver::new(&[("localhost", IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))]),
+            FakeTransport::new(&[]),
+        );
+
+        let err = fetcher
+            .fetch_with_address_policy(
+                FetchRequest {
+                    url: "http://localhost/page".to_string(),
+                    method: "GET".to_string(),
+                    headers: BTreeMap::new(),
+                },
+                &policy(&["example.test"]),
+                ResolvedAddressPolicy::DevAllowLoopback,
+            )
+            .unwrap_err();
+
+        assert!(err.to_string().contains("allowed_domains"));
+    }
+
+    #[test]
+    fn redirect_loopback_hops_use_dev_loopback_allowance_consistently() {
+        let fetcher = SafeFetcherParts::with_parts(
+            FakeResolver::new(&[
+                ("example.test", public_ip()),
+                (
+                    "local.example.test",
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                ),
+            ]),
+            FakeTransport::new(&[
+                (
+                    "https://example.test/start",
+                    TransportResponse {
+                        status: 302,
+                        location: Some("https://local.example.test/final".to_string()),
+                        body: Vec::new(),
+                    },
+                ),
+                (
+                    "https://local.example.test/final",
+                    TransportResponse {
+                        status: 200,
+                        location: None,
+                        body: b"ok".to_vec(),
+                    },
+                ),
+            ]),
+        );
+        let request = FetchRequest {
+            url: "https://example.test/start".to_string(),
+            method: "GET".to_string(),
+            headers: BTreeMap::new(),
+        };
+
+        let err = fetcher
+            .fetch(request.clone(), &policy(&["example.test"]))
+            .unwrap_err();
+        assert!(err.to_string().contains("resolved IP"));
+
+        let response = fetcher
+            .fetch_with_address_policy(
+                request,
+                &policy(&["example.test"]),
+                ResolvedAddressPolicy::DevAllowLoopback,
+            )
+            .unwrap();
+        assert_eq!(response.final_url, "https://local.example.test/final");
     }
 
     #[test]
