@@ -60,7 +60,11 @@ with fewer guarantees, but it must not claim stable status.
 ## Cut the release
 
 - [ ] Update `CHANGELOG.md` and `docs/release/<version>.md`.
-- [ ] Tag the release commit and publish a GitHub Release.
+- [ ] Run `scripts/cut-release.sh <version> <commit-sha>` to create the tag /
+      Release, patch `target_commitish` to the exact SHA, verify it, and
+      dispatch `Release hardening` (see the target lesson in
+      `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`).
+- [ ] Confirm the script completed against the exact intended commit SHA.
 - [ ] Attach a single canonical Python wheel, prebuilt host binaries for the
       supported platforms, the CycloneDX SBOM, and a `SHA256SUMS.txt`.
 - [ ] Record the hardening run and artifact checksums in the Release notes.
