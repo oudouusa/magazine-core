@@ -1,9 +1,10 @@
 # next implementation plan
 
-`magazine-core` is prepared for the `1.0.0` stable release (expected GitHub
-Release artifact set: Linux binary, canonical Python wheel, SBOM, and
-`SHA256SUMS.txt`). `protocol_version = 1` and `record_schema_version = 1` are
-the stable `1.x` contract identifiers. Downstream adapter evidence has
+`magazine-core` is preparing the additive `1.1.0` minor release on the stable
+`1.x` line (expected GitHub Release artifact set: Linux binary, canonical
+Python wheel, SBOM, and `SHA256SUMS.txt`). `protocol_version = 1` and
+`record_schema_version = 1` are unchanged stable contract identifiers.
+Downstream adapter evidence has
 exercised the host-fetch and extension-heavy migration shapes this repo was
 designed to support:
 
@@ -18,6 +19,11 @@ DB, or Python SDK model change from that evidence. CLI-driven optional
 discover limits (`max_pages` / `max_records` / `per_page`) were added as a
 generic gap, and the host now allows prompt plugin shutdown with a short
 grace for browser-backed plugins to close descendant processes.
+
+After `1.0.0`, a downstream hub gap note showed the need for local synthetic
+`host_fetch` smoke through a loopback fixture. The accepted core change is a
+dev-only operator flag, `mh discover --dev-allow-loopback-fetch`, with the
+default production fetch policy unchanged.
 
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap. Maintainer-approved product scope (standalone distribution and
@@ -57,6 +63,15 @@ Post-release on the current repo:
   workflow can publish the Linux binary, canonical Python wheel, SBOM, and
   checksums to an existing GitHub Release after verifying the release target
   commit.
+- `scripts/cut-release.sh` now performs exact-SHA release execution preflight,
+  tag / GitHub Release absence checks, queue checks, `target_commitish`
+  patch/verification, and release-hardening dispatch.
+- A repository-only WordPress REST plugin template provides a public-safe
+  `host_fetch` example with synthetic tests. Files under `examples/` are not
+  included in release artifacts and are not stable `1.x` contracts.
+- `mh discover --dev-allow-loopback-fetch` allows local synthetic loopback
+  smoke while keeping the default SSRF policy fail-closed and preserving the
+  `1.x` protocol, SDK root API, and canonical schema contracts.
 
 ## Protocol v1 Audit Result
 
@@ -87,15 +102,15 @@ code.
 
 Current status as of 2026-07-03:
 
-- release artifact consumption proof is complete through `0.1.0-beta.3`;
-  the GitHub Release contains the Linux binary, canonical Python wheel, SBOM,
-  and `SHA256SUMS.txt`, and public artifact UI smoke is verified by
+- release artifact consumption proof for the stable base is collected in
+  `docs/release/1.0.0.md`, with the public artifact UI smoke path evidenced by
   `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`.
+  `1.1.0` assets must still be verified after release execution.
 - downstream core-improvement intake is empty after closing private-only
-  manifest handling and accepted runtime DDL residual monitoring out of the
-  core promotion queue.
+  manifest handling, accepted runtime DDL residual monitoring, and the local
+  synthetic `host_fetch` loopback smoke gap out of the core promotion queue.
 - GitHub open issues, open pull requests, and repository security advisories
-  are empty as of the 2026-07-03 stable release-prep owner check.
+  are empty as of the 2026-07-03 `1.1.0` release-prep owner check.
 
 Standing evidence-driven intake remains:
 
@@ -105,14 +120,17 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: 1.0 Stabilization Criteria
+## Current Priority: 1.1.0 Additive Minor Release Prep
 
-Current bounded work has completed the maintainer-approved standalone
-distribution and admin/viewer UI product scope without changing
-`protocol_version`, `record_schema_version`, the Python SDK root API, or the
-canonical DB schema. The next priority is S4 release execution: create the
-`1.0.0` tag and GitHub Release at the exact release-prep commit, then dispatch
-release hardening:
+Current bounded work prepares `1.1.0` from `main` `fadf892` without creating a
+tag, GitHub Release, or push in the prep branch. The release packages the
+contract-neutral changes since `1.0.0`: exact-SHA release tooling, a
+repository-only WordPress REST plugin template, and the dev-only loopback
+`host_fetch` smoke opt-in. Release execution after merge must run
+`scripts/cut-release.sh 1.1.0 <exact-release-commit-sha>` from a clean checkout
+where that commit is reachable from `origin/main`.
+
+Completed `1.0.0` stabilization slices:
 
 1. Completed in the current standalone quickstart slice: documented and
    verified a linux-x86_64 quickstart where public Release artifacts alone run
@@ -195,13 +213,12 @@ Python SDK root API, or the canonical DB schema:
   protection; no runtime Node dependency in the distribution. The accepted ADR
   is `docs/development/admin-viewer-ui-adr-2026-07-02.md`.
 
-## 1.0 Criteria
+## 1.0 Criteria (completed)
 
 The formal gate is `docs/release/public-visibility-checklist.md` section
 `1.0.0 Eligibility Gate`. Cut `1.0.0` only after every item in that gate is
-true and the release notes link the supporting evidence. For the S3
-release-prep branch, the gate evidence is collected in `docs/release/1.0.0.md`;
-S4 must still create the tag and GitHub Release. At a minimum this requires:
+true and the release notes link the supporting evidence. The gate evidence is
+collected in `docs/release/1.0.0.md`. At a minimum this required:
 
 - a beta window with zero contract changes
 - release artifact consumption working downstream
@@ -211,9 +228,10 @@ S4 must still create the tag and GitHub Release. At a minimum this requires:
 - a documented post-`1.0.0` compatibility policy
 - version metadata, changelog, release notes, and GitHub Release tag agreement
 
-Current decision: S3 prepares the `1.0.0` release commit only. S4 is
-responsible for tag creation, GitHub Release creation with `target_commitish`
-set to the exact commit SHA, and release-hardening dispatch.
+Current decision: `1.0.0` is the stable base for later `1.x` additive releases.
+New stable release execution uses `scripts/cut-release.sh` to create the tag and
+GitHub Release at the exact merged release-prep commit SHA, then dispatch
+release hardening.
 
 ## Core Follow-Up Policy
 

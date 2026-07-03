@@ -5,6 +5,33 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-03
+
+### Added
+
+- Added `mh discover --dev-allow-loopback-fetch`, an explicit development-only
+  opt-in for local synthetic `host_fetch` smoke tests. The default fetch policy
+  still rejects loopback/private-style resolved IPs, and the opt-in only allows
+  loopback addresses while preserving allowed-domain, redirect, timeout, body
+  size, and header-policy checks.
+- Added a repository-only WordPress REST plugin template with synthetic tests,
+  example profile/manifest files, and README guidance. Release artifacts do not
+  include files under `examples/`.
+- Added `scripts/cut-release.sh` and coverage for release execution preflight:
+  exact commit SHA validation, release-note/version-discipline checks, tag and
+  GitHub Release absence checks, queue checks, exact `target_commitish`
+  patch/verification, and release-hardening dispatch.
+
+### Documentation
+
+- Documented the dev-only loopback fetch allowance in the protocol and plugin
+  host docs as an operator CLI flag, not a wire-protocol, schema, SDK root API,
+  or conformance fixture change.
+- Added the WordPress REST example README `Local Smoke (Dev-Only)` flow showing
+  the fail-closed loopback default and the explicit development opt-in.
+- Clarified that repository examples are outside the stable `1.x` compatibility
+  surface and that release execution should use `scripts/cut-release.sh`.
+
 ## [1.0.0] - 2026-07-03
 
 ### Stable
@@ -134,6 +161,7 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[1.1.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.1.0
 [1.0.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.0.0
 [0.1.0-beta.3]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.2

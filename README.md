@@ -8,14 +8,16 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **`1.0.0` stable release prep**。S3 では tag / GitHub Release / push を作成せず、
-  `protocol_version = 1` / `record_schema_version = 1` を stable `1.x`
-  contract とする release commit を準備する。S4 で exact commit SHA に tag /
-  Release を作成する。
+- **`1.1.0` release prep**。tag / GitHub Release / push は作成せず、`1.0.0`
+  からの additive minor release commit を準備する。`protocol_version = 1` /
+  `record_schema_version = 1` は stable `1.x` contract のまま不変。
 - protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
   parity の検証後、generic な discover limit gap として CLI-driven
   `max_pages` / `max_records` / `per_page` を protocol v1 の optional limits に追加済み。
   conformance fixtures は typed state、discover limits、non-empty `page_urls` の coverage を含む。
+- `1.0.0` 以降の additive 変更として、release exact-SHA preflight script、
+  repo-only WordPress REST plugin template、local synthetic smoke 用の
+  dev-only loopback `host_fetch` opt-in を追加済み。contract 4 面は不変。
 - 由来: ADR-0001（Rust host + stdio plugin protocol）の vertical-slice prototype
   （2つの独立実装が双方向で protocol 相互運用）。仕様は `docs/` の pinned
   CONTRACT に従う。
@@ -27,22 +29,22 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 - plugin host — `plugins.d` discovery / subprocess supervision / discover / spool / cancel・process-tree
 - Python SDK — framing / models / runtime / stdout guard / synthetic E2E、stable root plugin-author API（凍結）
 - DB-backed typed state — `known_source_urls` / summary / timestamps / fingerprint
-- safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts
-- release hardening — binary/wheel checksums / wheel smoke / SBOM / license inventory / secret scan
+- safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts / dev-only loopback smoke opt-in
+- release hardening — binary/wheel checksums / wheel smoke / SBOM / license inventory / secret scan / exact-SHA cut-release preflight
 
 ## 今後
 
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
-- stable tag / Release の作成は `docs/release/1.0.0.md` と
+- stable tag / Release の作成は `docs/release/1.1.0.md` と
   `docs/release/public-visibility-checklist.md` の evidence gate に従う。
 
 ## Standalone quickstart
 
-The currently published linux-x86_64 beta Release artifacts can be verified
-without using repo paths. After S4 publishes `1.0.0`, use `RELEASE_TAG=1.0.0`.
+The currently published linux-x86_64 stable Release artifacts can be verified
+without using repo paths. After `1.1.0` is published, use `RELEASE_TAG=1.1.0`.
 
 ```bash
-RELEASE_TAG=0.1.0-beta.3 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
+RELEASE_TAG=1.0.0 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
 ```
 
 See `docs/standalone-quickstart.md` for the manual artifact-only flow. Release
@@ -57,7 +59,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 python -m venv .venv
 .venv/bin/python -m pip install -e sdk/python pytest
-.venv/bin/python -m pytest sdk/python/tests
+.venv/bin/python -m pytest --rootdir=. sdk/python/tests examples/wordpress-rest-plugin/tests
 bash conformance/check_golden.sh             # 独立 oracle と pinned golden の照合
 bash scripts/release-hardening.sh             # release tag/SHA 前の artifact/checksum hardening
 cargo run -p mh-cli -- init-db ./scratch.db
