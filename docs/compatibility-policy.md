@@ -31,6 +31,8 @@ The following are not stable public contracts:
 
 - Python SDK low-level submodules and runtime internals outside the documented
   root plugin-author API;
+- repository-only examples under `examples/`, including template config files
+  and tests;
 - implementation details of the local UI HTTP routes. The packaged UI behavior
   is supported, but those routes are not a remote API contract;
 - unpublished distribution channels such as PyPI, Docker images, or

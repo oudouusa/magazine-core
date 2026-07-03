@@ -57,7 +57,7 @@ jobs:
         run: .venv/bin/python -m pip install -e sdk/python pytest
 
       - name: python sdk tests
-        run: .venv/bin/python -m pytest sdk/python/tests
+        run: .venv/bin/python -m pytest --rootdir=. sdk/python/tests examples/wordpress-rest-plugin/tests
 
       - name: golden oracle parity
         run: bash conformance/check_golden.sh

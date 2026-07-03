@@ -1,0 +1,12 @@
+{
+  "id": "my_wordpress",
+  "argv": [
+    "python3",
+    "examples/wordpress-rest-plugin/wordpress_rest_plugin.py",
+    "examples/wordpress-rest-plugin/wordpress-rest-sites.example.toml"
+  ],
+  "env": {
+    "PYTHONPATH": "sdk/python/src"
+  },
+  "working_dir": "../../.."
+}
