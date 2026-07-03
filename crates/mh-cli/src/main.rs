@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use mh_db::Database;
 use mh_host::{
-    discover_plugins, DiscoverLimits, PluginHost, StateError, StateOperation, StateProvider,
+    discover_plugins, DiscoverLimits, HostFetchOptions, PluginHost, StateError, StateOperation,
+    StateProvider,
 };
 use serde_json::{json, Value};
 
@@ -66,14 +67,20 @@ fn run_discover(args: &[String]) -> Result<(), Box<dyn Error>> {
         .iter()
         .find(|plugin| plugin.id == *plugin_id)
         .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+    if options.fetch_options.dev_allow_loopback_fetch {
+        eprintln!(
+            "warning: --dev-allow-loopback-fetch is development-only for local synthetic smoke; never use in production"
+        );
+    }
     let run = {
         let state_provider = DbStateProvider { db: &db };
-        PluginHost::default().run_discover_with_state_provider(
+        PluginHost::default().run_discover_with_state_provider_and_fetch_options(
             plugin,
             "cli-run",
             options.limits,
             options.timeout,
             &state_provider,
+            options.fetch_options,
         )?
     };
     let ingest = db.ingest_records(&run.records)?;
@@ -98,6 +105,7 @@ fn run_discover(args: &[String]) -> Result<(), Box<dyn Error>> {
 struct DiscoverOptions {
     limits: DiscoverLimits,
     timeout: Duration,
+    fetch_options: HostFetchOptions,
 }
 
 impl Default for DiscoverOptions {
@@ -105,6 +113,7 @@ impl Default for DiscoverOptions {
         Self {
             limits: DiscoverLimits::default(),
             timeout: DEFAULT_DISCOVER_TIMEOUT,
+            fetch_options: HostFetchOptions::default(),
         }
     }
 }
@@ -115,38 +124,57 @@ fn parse_discover_options(args: &[String]) -> Result<DiscoverOptions, Box<dyn Er
     let mut index = 0;
     while index < args.len() {
         let flag = args[index].as_str();
-        let Some(value) = args.get(index + 1) else {
-            return Err(format!("{flag} requires a value").into());
-        };
         match flag {
+            "--dev-allow-loopback-fetch" => {
+                if options.fetch_options.dev_allow_loopback_fetch {
+                    return Err("--dev-allow-loopback-fetch specified more than once".into());
+                }
+                options.fetch_options.dev_allow_loopback_fetch = true;
+                index += 1;
+            }
             "--max-pages" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(format!("{flag} requires a value").into());
+                };
                 let parsed = parse_limit_value(flag, value)?;
                 if options.limits.max_pages.replace(parsed).is_some() {
                     return Err("--max-pages specified more than once".into());
                 }
+                index += 2;
             }
             "--max-records" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(format!("{flag} requires a value").into());
+                };
                 let parsed = parse_limit_value(flag, value)?;
                 if options.limits.max_records.replace(parsed).is_some() {
                     return Err("--max-records specified more than once".into());
                 }
+                index += 2;
             }
             "--per-page" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(format!("{flag} requires a value").into());
+                };
                 let parsed = parse_limit_value(flag, value)?;
                 if options.limits.per_page.replace(parsed).is_some() {
                     return Err("--per-page specified more than once".into());
                 }
+                index += 2;
             }
             "--timeout-seconds" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(format!("{flag} requires a value").into());
+                };
                 if timeout_seen {
                     return Err("--timeout-seconds specified more than once".into());
                 }
                 timeout_seen = true;
                 options.timeout = parse_timeout_seconds(value)?;
+                index += 2;
             }
             _ => return Err(format!("unknown discover option: {flag}").into()),
         }
-        index += 2;
     }
     Ok(options)
 }
@@ -172,7 +200,7 @@ fn parse_timeout_seconds(value: &str) -> Result<Duration, Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N] [--manage]"
+    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N] [--dev-allow-loopback-fetch]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N] [--manage]"
 }
 
 struct DbStateProvider<'a> {
@@ -214,7 +242,10 @@ mod tests {
     use super::*;
     use mh_domain::SourceRecord;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -244,6 +275,39 @@ mod tests {
             normalizer_version: None,
             extra: serde_json::Map::new(),
         }
+    }
+
+    fn spawn_http_server(body: &'static [u8]) -> (u16, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).unwrap();
+        let handle = thread::spawn(move || {
+            let started = Instant::now();
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _addr)) => {
+                        let mut buffer = [0_u8; 1024];
+                        let _ = stream.read(&mut buffer);
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+                            body.len()
+                        )
+                        .unwrap();
+                        stream.write_all(body).unwrap();
+                        return;
+                    }
+                    Err(err)
+                        if err.kind() == std::io::ErrorKind::WouldBlock
+                            && started.elapsed() < Duration::from_secs(10) =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("local HTTP test server failed: {err}"),
+                }
+            }
+        });
+        (port, handle)
     }
 
     #[test]
@@ -334,6 +398,105 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": len(r
 
         let inspection = Database::inspect_path(&db_path).unwrap();
         assert_eq!(inspection.source_posts, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn discover_dev_loopback_fetch_flag_controls_loopback_host_fetch() {
+        let dir = temp_dir("loopback-fetch");
+        let db_path = dir.join("core.db");
+        let (port, server) = spawn_http_server(b"ok");
+
+        let plugin = dir.join("plugin.py");
+        fs::write(
+            &plugin,
+            format!(
+                r#"
+import json
+import struct
+import sys
+
+def read_frame():
+    header = sys.stdin.buffer.read(4)
+    if not header:
+        raise SystemExit(0)
+    size = struct.unpack(">I", header)[0]
+    return json.loads(sys.stdin.buffer.read(size).decode("utf-8"))
+
+def write_frame(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack(">I", len(payload)))
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+
+init = read_frame()
+write_frame({{"jsonrpc": "2.0", "id": init["id"], "result": {{
+    "protocol_version": 1,
+    "record_schema_version": 1,
+    "manifest": {{
+        "source_name": "synthetic",
+        "display_label": "Synthetic",
+        "allowed_domains": ["127.0.0.1"],
+        "capabilities": ["host_fetch"]
+    }}
+}}}})
+
+discover = read_frame()
+request_id = discover["params"]["request_id"]
+write_frame({{"jsonrpc": "2.0", "id": "p-1", "method": "fetch_request", "params": {{
+    "id": "fetch-1",
+    "request": {{"url": "http://127.0.0.1:{port}/fixture", "method": "GET"}}
+}}}})
+fetch_response = read_frame()
+if "error" in fetch_response:
+    raise SystemExit(1)
+write_frame({{"jsonrpc": "2.0", "method": "record", "params": {{"request_id": request_id, "record": {{
+    "source_name": "synthetic",
+    "source_url": "synthetic://loopback/1",
+    "title": "Loopback fetched",
+    "brand_raw": "Synthetic Brand"
+}}}}}})
+write_frame({{"jsonrpc": "2.0", "id": discover["id"], "result": {{"records": 1}}}})
+"#,
+            ),
+        )
+        .unwrap();
+        let plugins_dir = dir.join("plugins.d");
+        fs::create_dir(&plugins_dir).unwrap();
+        fs::write(
+            plugins_dir.join("synthetic.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": [std::env::var("PYTHON").unwrap_or_else(|_| "python3".to_string()), plugin]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let err = run(vec![
+            "discover".to_string(),
+            db_path.to_string_lossy().to_string(),
+            plugins_dir.to_string_lossy().to_string(),
+            "synthetic".to_string(),
+        ])
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("host fetch error"),
+            "unexpected default discover error: {err}"
+        );
+        assert_eq!(Database::inspect_path(&db_path).unwrap().source_posts, 0);
+
+        run(vec![
+            "discover".to_string(),
+            db_path.to_string_lossy().to_string(),
+            plugins_dir.to_string_lossy().to_string(),
+            "synthetic".to_string(),
+            "--dev-allow-loopback-fetch".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(Database::inspect_path(&db_path).unwrap().source_posts, 1);
+
+        server.join().unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -543,6 +706,7 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
             "3".to_string(),
             "--per-page".to_string(),
             "16".to_string(),
+            "--dev-allow-loopback-fetch".to_string(),
         ])
         .unwrap();
 
@@ -555,6 +719,7 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
             }
         );
         assert_eq!(options.timeout, DEFAULT_DISCOVER_TIMEOUT);
+        assert!(options.fetch_options.dev_allow_loopback_fetch);
     }
 
     #[test]
@@ -574,6 +739,16 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": 0}})
         assert!(parse_discover_options(&["--max-pages".to_string(), "0".to_string()]).is_err());
         assert!(parse_discover_options(&["--per-page".to_string(), "0".to_string()]).is_err());
         assert!(parse_discover_options(&["--max-records".to_string(), "0".to_string()]).is_ok());
+        assert!(parse_discover_options(&[
+            "--dev-allow-loopback-fetch".to_string(),
+            "--dev-allow-loopback-fetch".to_string(),
+        ])
+        .is_err());
+        assert!(parse_discover_options(&[
+            "--dev-allow-loopback-fetch".to_string(),
+            "1".to_string(),
+        ])
+        .is_err());
     }
 
     #[test]

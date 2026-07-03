@@ -321,6 +321,16 @@ impl DiscoverLimits {
     }
 }
 
+/// Host fetch behavior toggles outside the protocol contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostFetchOptions {
+    /// Development-only local synthetic smoke opt-in for loopback resolved IPs.
+    ///
+    /// The default remains false. This does not relax allowed_domains, scheme,
+    /// redirect, header, timeout, size, or non-loopback forbidden IP checks.
+    pub dev_allow_loopback_fetch: bool,
+}
+
 /// Protocol log emitted by a plugin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostLog {
@@ -419,6 +429,16 @@ trait FetchProvider {
 #[derive(Debug, Clone, Default)]
 struct SafeFetchProvider {
     fetcher: SafeFetcher,
+    options: HostFetchOptions,
+}
+
+impl SafeFetchProvider {
+    fn with_options(options: HostFetchOptions) -> Self {
+        Self {
+            fetcher: SafeFetcher::new(),
+            options,
+        }
+    }
 }
 
 impl FetchProvider for SafeFetchProvider {
@@ -431,9 +451,13 @@ impl FetchProvider for SafeFetchProvider {
         let mut policy = FetchPolicy::for_allowed_domains(manifest.allowed_domains.clone());
         policy.total_timeout = policy.total_timeout.min(timeout);
         policy.connect_timeout = policy.connect_timeout.min(policy.total_timeout);
-        self.fetcher
-            .fetch(request, &policy)
-            .map_err(|err| HostFetchError::backend(err.to_string()))
+        let result = if self.options.dev_allow_loopback_fetch {
+            self.fetcher
+                .fetch_with_dev_loopback_allowance(request, &policy)
+        } else {
+            self.fetcher.fetch(request, &policy)
+        };
+        result.map_err(|err| HostFetchError::backend(err.to_string()))
     }
 }
 
@@ -550,6 +574,26 @@ impl PluginHost {
             timeout,
             state_provider,
             &SafeFetchProvider::default(),
+        )
+    }
+
+    /// Run discovery with typed state and explicit host fetch behavior toggles.
+    pub fn run_discover_with_state_provider_and_fetch_options(
+        &self,
+        plugin: &PluginDefinition,
+        request_id: &str,
+        limits: DiscoverLimits,
+        timeout: Duration,
+        state_provider: &dyn StateProvider,
+        fetch_options: HostFetchOptions,
+    ) -> Result<HostRun, HostError> {
+        self.run_discover_with_providers(
+            plugin,
+            request_id,
+            limits,
+            timeout,
+            state_provider,
+            &SafeFetchProvider::with_options(fetch_options),
         )
     }
 

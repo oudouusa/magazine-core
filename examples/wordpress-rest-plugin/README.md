@@ -80,6 +80,71 @@ The checked-in example profile uses `example.com`. Replace it with a profile
 for a site you are responsible for before expecting `discover` to fetch real
 posts.
 
+## Local Smoke (Dev-Only)
+
+Use this only for a synthetic local host_fetch smoke. The host default rejects
+loopback resolved IPs. `--dev-allow-loopback-fetch` is an explicit local
+development opt-in; it allows loopback only and prints a stderr warning. Never
+use it for production.
+
+From the repository root, start a synthetic WordPress JSON fixture server:
+
+```bash
+python3 -m http.server 8766 --bind 127.0.0.1 --directory examples/wordpress-rest-plugin/tests
+```
+
+In another shell, create a temporary profile and command manifest:
+
+```bash
+mkdir -p tmp/wordpress-local-smoke/plugins.d
+cat > tmp/wordpress-local-smoke/profile.toml <<'TOML'
+profile_version = 1
+source_name = "local_wordpress_smoke"
+display_label = "Local WordPress Smoke"
+base_url = "http://127.0.0.1:8766"
+allowed_domains = ["127.0.0.1"]
+endpoint = "/fixture-posts.json"
+category_ids = []
+default_per_page = 3
+default_max_pages = 1
+default_max_records = 3
+brand_raw = "Synthetic WordPress"
+TOML
+cat > tmp/wordpress-local-smoke/plugins.d/local-wordpress.json <<'JSON'
+{
+  "id": "local_wordpress_smoke",
+  "argv": [
+    "python3",
+    "examples/wordpress-rest-plugin/wordpress_rest_plugin.py",
+    "tmp/wordpress-local-smoke/profile.toml"
+  ],
+  "env": {
+    "PYTHONPATH": "sdk/python/src"
+  },
+  "working_dir": "../../.."
+}
+JSON
+```
+
+The fail-closed side should reject loopback and ingest zero records:
+
+```bash
+cargo run -p mh-cli -- init-db tmp/wordpress-local-smoke/smoke.db
+cargo run -p mh-cli -- discover tmp/wordpress-local-smoke/smoke.db tmp/wordpress-local-smoke/plugins.d local_wordpress_smoke --max-pages 1 --per-page 3 --max-records 3 --timeout-seconds 10
+```
+
+Expected stderr includes `resolved IP 127.0.0.1 is not allowed`. With the dev
+opt-in, the same synthetic fixture should ingest records:
+
+```bash
+cargo run -p mh-cli -- discover tmp/wordpress-local-smoke/smoke.db tmp/wordpress-local-smoke/plugins.d local_wordpress_smoke --max-pages 1 --per-page 3 --max-records 3 --timeout-seconds 10 --dev-allow-loopback-fetch
+cargo run -p mh-cli -- inspect tmp/wordpress-local-smoke/smoke.db
+```
+
+Expected stderr includes the development-only warning, and `inspect` reports
+`source_posts` greater than zero. The fixture records use `example.invalid`
+links and media URLs.
+
 ## Mapping
 
 - `title`: `post.title.rendered`, with HTML stripped;

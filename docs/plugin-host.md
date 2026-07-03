@@ -30,7 +30,7 @@ message loop を実行する。site-specific adapter や proxy/cookie/challenge 
    `record_schema_version = 1` を検証する。
 3. host→plugin `discover` request を送り、応答待ち中に plugin→host の message を処理する。
 4. `record` notification は `SourceRecord` として検証し、memory spool に追加する。
-5. CLI `mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N]` は canonical DB を先に
+5. CLI `mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N] [--dev-allow-loopback-fetch]` は canonical DB を先に
    open/init し、read-only state provider と指定された discover limits を渡して discovery を走らせる。
 6. plugin が clean exit した後、spool を単一 DB transaction で ingest する。
 
@@ -49,6 +49,13 @@ JSON-RPC id は plugin namespace の `p-*` string を必須にする。
 - `fetch_request`: `manifest.allowed_domains` を使う safe host_fetch broker で応答する。
   http/https、redirect 再検査、DNS 後 IP 検査、timeout、body 上限、header policy を host が強制する。
   policy/network error は JSON-RPC error と host failure になり、DB ingest へ進まない。
+  既定では loopback / private / link-local などの forbidden IP は fail-closed で拒否する。
+  `mh discover --dev-allow-loopback-fetch` は local synthetic smoke のための dev-only 明示 opt-in で、
+  IPv4 `127.0.0.0/8`、IPv6 `::1`、IPv4-mapped loopback だけを DNS 後 IP 検査で許可する。
+  有効時は stderr に production 禁止の警告を 1 回出す。allowed_domains、scheme、redirect hop
+  再検査、timeout、body 上限、header policy は従来どおり強制し、private / link-local /
+  carrier-grade NAT / IPv6 unique-local / multicast 等は引き続き拒否する。
+  この opt-in は CLI argv のみで、plugin manifest / site profile / env var / `mh ui` からは有効化できない。
 
 `discover` result の `records` は spool 済み record 件数と一致しなければならない。
 不一致は plugin bug として fail-closed し、DB ingest へ進まない。
