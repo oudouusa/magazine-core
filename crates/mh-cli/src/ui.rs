@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mh_db::Database;
 use mh_host::{
@@ -26,6 +26,10 @@ const MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS: u64 = 3_600;
 /// stalls this long is not a slow client but a connection that will never
 /// complete. Without it a single silent connection blocks the whole listener.
 const UI_SOCKET_TIMEOUT: Duration = Duration::from_secs(15);
+/// Absolute budget for reading one request. The per-read timeout above only
+/// bounds a single blocking read, so a client trickling one byte at a time
+/// would otherwise hold a worker (and its concurrency slot) indefinitely.
+const UI_REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 /// Upper bound on connections served at once. Excess connections are refused
 /// with 503 rather than queued behind the accept loop.
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
@@ -217,11 +221,21 @@ struct HttpRequest {
 }
 
 fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> {
+    read_http_request_until(stream, Instant::now() + UI_REQUEST_DEADLINE)
+}
+
+fn read_http_request_until(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> io::Result<Option<HttpRequest>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 1024];
     let header_end = loop {
         if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
             break index + 4;
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
         }
         let read = stream.read(&mut chunk)?;
         if read == 0 {
@@ -279,6 +293,9 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> 
     }
     let mut body = buffer[header_end..].to_vec();
     while body.len() < content_length {
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
         let read = stream.read(&mut chunk)?;
         if read == 0 {
             return Ok(None);
@@ -805,12 +822,35 @@ fn completed_run_json(run: &CompletedRun) -> Value {
     })
 }
 
+/// Compares an authority against the loopback address this process is bound to.
+///
+/// Host names are case-insensitive and clients omit the port when it is the
+/// scheme default, so a byte-exact comparison rejects legitimate requests:
+/// `LOCALHOST:8765`, or a bare `127.0.0.1` when the UI was started on `:80`.
+/// Normalizing here does not widen the guard — a foreign name still fails the
+/// host check regardless of case or port.
 fn is_allowed_loopback_authority(value: &str, port: u16) -> bool {
-    value == format!("127.0.0.1:{port}") || value == format!("localhost:{port}")
+    const DEFAULT_HTTP_PORT: u16 = 80;
+    let value = value.trim();
+    let (host, authority_port) = match value.rsplit_once(':') {
+        Some((host, port_text)) => match port_text.parse::<u16>() {
+            Ok(parsed) => (host, parsed),
+            Err(_) => return false,
+        },
+        None => (value, DEFAULT_HTTP_PORT),
+    };
+    authority_port == port
+        && (host.eq_ignore_ascii_case("127.0.0.1") || host.eq_ignore_ascii_case("localhost"))
 }
 
 fn is_allowed_origin(value: &str, port: u16) -> bool {
-    value == format!("http://127.0.0.1:{port}") || value == format!("http://localhost:{port}")
+    let value = value.trim();
+    match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("http://") => {
+            is_allowed_loopback_authority(&value[7..], port)
+        }
+        _ => false,
+    }
 }
 
 fn generate_token() -> Result<String, Box<dyn Error>> {
@@ -1365,6 +1405,77 @@ mod tests {
         assert!(
             text.starts_with("HTTP/1.1 200 OK"),
             "second request was not served while a silent connection was open: {text}"
+        );
+    }
+
+    #[test]
+    fn loopback_authority_accepts_case_and_default_port_variants() {
+        // Host names are case-insensitive (RFC 3986 / 7230).
+        assert!(is_allowed_loopback_authority("LOCALHOST:8765", 8765));
+        assert!(is_allowed_loopback_authority("LocalHost:8765", 8765));
+        assert!(is_allowed_loopback_authority(" 127.0.0.1:8765 ", 8765));
+        // Clients omit the port when it is the scheme default.
+        assert!(is_allowed_loopback_authority("127.0.0.1", 80));
+        assert!(is_allowed_loopback_authority("localhost", 80));
+        assert!(is_allowed_origin("HTTP://LOCALHOST:8765", 8765));
+        assert!(is_allowed_origin("http://127.0.0.1", 80));
+    }
+
+    #[test]
+    fn loopback_authority_still_rejects_foreign_and_mismatched_authorities() {
+        assert!(!is_allowed_loopback_authority("evil.test:8765", 8765));
+        assert!(!is_allowed_loopback_authority("EVIL.TEST:8765", 8765));
+        // A bare foreign name must not slip through the default-port branch.
+        assert!(!is_allowed_loopback_authority("evil.test", 80));
+        // Port must still match exactly.
+        assert!(!is_allowed_loopback_authority("127.0.0.1:9999", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1:", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1:notaport", 8765));
+        // Only loopback literals, and only over http.
+        assert!(!is_allowed_loopback_authority("127.0.0.2:8765", 8765));
+        assert!(!is_allowed_loopback_authority("[::1]:8765", 8765));
+        assert!(!is_allowed_origin("https://127.0.0.1:8765", 8765));
+        assert!(!is_allowed_origin("http://evil.test:8765", 8765));
+        assert!(!is_allowed_origin("127.0.0.1:8765", 8765));
+    }
+
+    #[test]
+    fn read_stops_at_the_absolute_deadline_even_while_bytes_arrive() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicUsize::new(0));
+        let writer_stop = Arc::clone(&stop);
+        // Trickle header bytes forever: every read succeeds, so a per-read
+        // timeout alone would never fire.
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            while writer_stop.load(Ordering::Acquire) == 0 {
+                if stream.write_all(b"X").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        accepted
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let started = Instant::now();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(300))
+                .unwrap();
+        let elapsed = started.elapsed();
+
+        stop.store(1, Ordering::Release);
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(request.is_none(), "a never-finished request was accepted");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "deadline did not cut off a trickling client: {elapsed:?}"
         );
     }
 
