@@ -13,6 +13,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 const LATEST_SCHEMA_VERSION: i64 = 1;
+/// Upper bound on one `view` page. Matches the bundled UI's `/api/records` cap
+/// so both read paths bound a single response the same way.
+const VIEW_MAX_LIMIT: u32 = 200;
 
 const MIGRATION_0001: &str = r#"
 CREATE TABLE IF NOT EXISTS mh_schema_migrations (
@@ -267,6 +270,139 @@ impl Database {
         })
     }
 
+    /// Return a keyset page of post metadata for external readers.
+    ///
+    /// Ordered by `id` ASC and resumed with `after_id` rather than an offset.
+    /// The UI's `source_record_page` orders by `updated_at DESC`, which is a
+    /// mutable column: a record touched between two pages moves, so an offset
+    /// walk over it both repeats and skips rows. A reader that pages through
+    /// the whole table needs the stable key.
+    ///
+    /// URLs are deliberately absent. A caller that wants them names the posts
+    /// it wants through [`Database::view_post_assets`], which keeps the bulk of
+    /// the third-party data out of a listing that may be forwarded elsewhere.
+    pub fn view_posts_page(
+        &self,
+        limit: u32,
+        after_id: Option<i64>,
+        source_name: Option<&str>,
+        include_extra: bool,
+    ) -> Result<ViewPostsPage, DbError> {
+        let limit = limit.clamp(1, VIEW_MAX_LIMIT);
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                id,
+                source_name,
+                title,
+                brand_raw,
+                issue_no,
+                release_date,
+                post_date,
+                extra_json,
+                last_seen_at
+            FROM source_posts
+            WHERE id > ?1 AND (?2 IS NULL OR source_name = ?2)
+            ORDER BY id ASC
+            LIMIT ?3
+            "#,
+        )?;
+        let base_rows = stmt
+            .query_map(
+                params![after_id.unwrap_or(0), source_name, i64::from(limit)],
+                |row| {
+                    let extra_json: String = row.get(7)?;
+                    Ok(ViewPost {
+                        id: row.get(0)?,
+                        source_name: row.get(1)?,
+                        title: row.get(2)?,
+                        brand_raw: row.get(3)?,
+                        issue_no: row.get(4)?,
+                        release_date: row.get(5)?,
+                        post_date: row.get(6)?,
+                        last_seen_at: row.get(8)?,
+                        performers_raw: Vec::new(),
+                        counts: ViewPostCounts::default(),
+                        extra: if include_extra {
+                            Some(parse_json_object(&extra_json)?)
+                        } else {
+                            None
+                        },
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::Sqlite)?;
+
+        let mut posts = Vec::with_capacity(base_rows.len());
+        for mut post in base_rows {
+            post.performers_raw = child_values(
+                &self.conn,
+                "source_post_performers",
+                "performer_raw",
+                post.id,
+            )?;
+            post.counts = ViewPostCounts {
+                covers: child_count(&self.conn, "source_post_covers", post.id)?,
+                pages: child_count(&self.conn, "source_post_pages", post.id)?,
+                external_links: child_count(&self.conn, "source_post_external_links", post.id)?,
+            };
+            posts.push(post);
+        }
+
+        // Only advertise a cursor when the page was filled; a short page means
+        // the caller has reached the end and should stop rather than poll.
+        let next_after_id = if posts.len() == limit as usize {
+            posts.last().map(|post| post.id)
+        } else {
+            None
+        };
+        Ok(ViewPostsPage {
+            limit,
+            after_id,
+            returned: posts.len(),
+            next_after_id,
+            posts,
+        })
+    }
+
+    /// Return the URL groups for explicitly named posts.
+    ///
+    /// Unknown ids are reported in `missing` rather than silently dropped, so a
+    /// caller cannot mistake a typo for an empty result.
+    pub fn view_post_assets(&self, post_ids: &[i64]) -> Result<ViewPostAssets, DbError> {
+        let mut assets = Vec::new();
+        let mut missing = Vec::new();
+        for &id in post_ids {
+            let source_name: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT source_name FROM source_posts WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(source_name) = source_name else {
+                missing.push(id);
+                continue;
+            };
+            assets.push(ViewPostAsset {
+                id,
+                source_name,
+                performers_raw: child_values(
+                    &self.conn,
+                    "source_post_performers",
+                    "performer_raw",
+                    id,
+                )?,
+                cover_urls: child_values(&self.conn, "source_post_covers", "cover_url", id)?,
+                page_urls: child_values(&self.conn, "source_post_pages", "page_url", id)?,
+                external_links: external_links(&self.conn, id)?,
+            });
+        }
+        Ok(ViewPostAssets { assets, missing })
+    }
+
     /// Return typed known-source-url state grouped by source.
     pub fn known_source_url_state(
         &self,
@@ -402,6 +538,62 @@ pub struct UiSummary {
     pub inspection: DbInspection,
     pub sources: Vec<SourceSummary>,
     pub known_source_urls: i64,
+}
+
+/// Keyset page of post metadata for external readers.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewPostsPage {
+    pub limit: u32,
+    pub after_id: Option<i64>,
+    pub returned: usize,
+    /// Cursor for the next call, or `None` at the end of the table.
+    pub next_after_id: Option<i64>,
+    pub posts: Vec<ViewPost>,
+}
+
+/// Post metadata without URL groups.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewPost {
+    pub id: i64,
+    pub source_name: String,
+    pub title: String,
+    pub brand_raw: String,
+    pub issue_no: Option<String>,
+    pub release_date: Option<String>,
+    pub post_date: Option<String>,
+    pub last_seen_at: String,
+    pub performers_raw: Vec<String>,
+    pub counts: ViewPostCounts,
+    /// Downstream-private payload, included only on explicit request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Map<String, Value>>,
+}
+
+/// Child-row counts, so a reader can size a post without fetching its URLs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ViewPostCounts {
+    pub covers: i64,
+    pub pages: i64,
+    pub external_links: i64,
+}
+
+/// URL groups for explicitly named posts.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewPostAssets {
+    pub assets: Vec<ViewPostAsset>,
+    /// Requested ids that do not exist, reported rather than dropped.
+    pub missing: Vec<i64>,
+}
+
+/// URL groups for one post.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ViewPostAsset {
+    pub id: i64,
+    pub source_name: String,
+    pub performers_raw: Vec<String>,
+    pub cover_urls: Vec<String>,
+    pub page_urls: Vec<String>,
+    pub external_links: Vec<ExternalLink>,
 }
 
 /// Per-source count returned to the bundled read-only UI.
@@ -973,6 +1165,16 @@ fn parse_json_object(raw: &str) -> Result<serde_json::Map<String, Value>, rusqli
     })
 }
 
+fn child_count(
+    conn: &Connection,
+    table: &'static str,
+    source_post_id: i64,
+) -> Result<i64, DbError> {
+    let sql = format!("SELECT COUNT(*) FROM {table} WHERE source_post_id = ?1");
+    conn.query_row(&sql, params![source_post_id], |row| row.get(0))
+        .map_err(DbError::Sqlite)
+}
+
 fn child_values(
     conn: &Connection,
     table: &'static str,
@@ -1021,6 +1223,120 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("mh-db-{name}-{stamp}.db"))
+    }
+
+    #[test]
+    fn view_posts_page_walks_the_whole_table_by_keyset_without_gaps_or_repeats() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        let records: Vec<SourceRecord> = (1..=7)
+            .map(|n| record(&format!("synthetic://post/{n}")))
+            .collect();
+        db.ingest_records(&records).unwrap();
+
+        let mut seen = Vec::new();
+        let mut after_id = None;
+        loop {
+            let page = db.view_posts_page(2, after_id, None, false).unwrap();
+            seen.extend(page.posts.iter().map(|post| post.id));
+            match page.next_after_id {
+                Some(next) => after_id = Some(next),
+                None => break,
+            }
+        }
+        assert_eq!(seen, vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn view_posts_page_is_stable_when_a_row_is_touched_mid_walk() {
+        // The UI's page orders by `updated_at DESC`, so re-ingesting a record
+        // moves it and an offset walk would repeat or skip. The keyset order
+        // must not care.
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        let records: Vec<SourceRecord> = (1..=4)
+            .map(|n| record(&format!("synthetic://post/{n}")))
+            .collect();
+        db.ingest_records(&records).unwrap();
+
+        let first = db.view_posts_page(2, None, None, false).unwrap();
+        assert_eq!(
+            first.posts.iter().map(|p| p.id).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // Touch the row that already went past; it must not reappear.
+        db.ingest_records(&[record("synthetic://post/1")]).unwrap();
+
+        let second = db
+            .view_posts_page(2, first.next_after_id, None, false)
+            .unwrap();
+        assert_eq!(
+            second.posts.iter().map(|p| p.id).collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+    }
+
+    #[test]
+    fn view_posts_page_omits_urls_and_gates_extra() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        db.ingest_records(&[record("synthetic://post/1")]).unwrap();
+
+        let page = db.view_posts_page(10, None, None, false).unwrap();
+        let encoded = serde_json::to_string(&page).unwrap();
+        assert!(
+            !encoded.contains("http"),
+            "posts page leaked a URL: {encoded}"
+        );
+        assert!(page.posts[0].extra.is_none());
+        // Counts stand in for the omitted URL groups.
+        assert_eq!(page.posts[0].counts.covers, 2);
+        assert_eq!(page.posts[0].counts.pages, 1);
+        assert_eq!(page.posts[0].counts.external_links, 1);
+
+        let with_extra = db.view_posts_page(10, None, None, true).unwrap();
+        assert!(with_extra.posts[0].extra.is_some());
+    }
+
+    #[test]
+    fn view_posts_page_filters_by_source_and_clamps_limit() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        db.ingest_records(&[record("synthetic://post/1")]).unwrap();
+
+        assert_eq!(
+            db.view_posts_page(10, None, Some("synthetic"), false)
+                .unwrap()
+                .returned,
+            1
+        );
+        assert_eq!(
+            db.view_posts_page(10, None, Some("absent"), false)
+                .unwrap()
+                .returned,
+            0
+        );
+        assert_eq!(
+            db.view_posts_page(9_999, None, None, false).unwrap().limit,
+            VIEW_MAX_LIMIT
+        );
+        assert_eq!(db.view_posts_page(0, None, None, false).unwrap().limit, 1);
+    }
+
+    #[test]
+    fn view_post_assets_returns_urls_and_reports_unknown_ids() {
+        let mut db = Database::open_in_memory().unwrap();
+        db.initialize().unwrap();
+        db.ingest_records(&[record("synthetic://post/1")]).unwrap();
+
+        let assets = db.view_post_assets(&[1, 4242]).unwrap();
+        assert_eq!(assets.assets.len(), 1);
+        assert_eq!(assets.assets[0].cover_urls.len(), 2);
+        assert_eq!(assets.assets[0].page_urls.len(), 1);
+        assert_eq!(assets.assets[0].external_links.len(), 1);
+        // An unknown id must be visible, not silently absent.
+        assert_eq!(assets.missing, vec![4242]);
     }
 
     fn record(source_url: &str) -> SourceRecord {
