@@ -1,9 +1,13 @@
-# ADR draft: `mh view` read commands (2026-07-28)
+# ADR: `mh view` read commands (2026-07-28)
 
-**Status: draft. Not ratified.** This records the reasoning and the exact text
-proposed for the downstream freeze document so the owner can accept, amend, or
-reject it in one place. The implementation it describes is on the branch that
-carries this file; nothing here is a decision until the owner signs it.
+**Status: ratified by the owner on 2026-07-28.** One implementation slice — the
+`mh view` read subcommands — is permitted outside the implementation freeze on
+the terms recorded below. No other slice is unfrozen by this decision.
+
+The governing record lives in the downstream freeze document; the addendum text
+under "Freeze position" is what was accepted. This file is the reasoning behind
+it, kept in the repository the change lands in so a future reader finds the
+justification next to the code.
 
 ## Context
 
@@ -68,7 +72,7 @@ That was considered and rejected: a contract needs consumers, and the only two
 candidates — a viewer and an agent bridge — were measured to share almost
 nothing. See the note under "Rejected alternatives".
 
-## Freeze position — the part that needs owner ratification
+## Freeze position — ratified
 
 The 2026-07-21 ratified decision froze implementation and capped the loop, with
 the permitted categories being blocking, measurement, maintenance, and docs. A
@@ -76,7 +80,7 @@ new subcommand is implementation and therefore **outside that cap**. The
 document states that conditions, caps and permit-lists change only by an
 addendum to itself.
 
-Proposed addendum text, in the style of the existing §7:
+Accepted addendum text, in the style of the existing §7:
 
 > ### ADR 2026-07-28: `mh view` read commands
 >
@@ -123,9 +127,16 @@ it is one of the falsification conditions above.
 
 - **A second plugin contract (DB read surface + UI extension point).** Designed
   and prototyped against two consumers; they shared two of three operation
-  shapes and no UI surface at all, and the static-asset facility that the
-  contract's UI half exists to provide had zero consumers. A contract with one
-  real consumer is a guess.
+  shapes and no UI surface at all. Fitting one contract to a viewer and an agent
+  bridge made each half dead weight for the other consumer, and the agent side
+  is served better by exactly this command-line read path.
+
+  One caveat on that measurement, since it is easy to over-read: the UI half's
+  static-asset facility recorded zero consumers, but both prototypes were
+  deliberately dependency-free — the case that does not need asset serving. That
+  number says nothing about a plugin that ships a bundled framework. See
+  `docs/development/ui-plugin-contract-draft-2026-07-28.md`; it does not weaken
+  the conclusion here, which rests on the two consumers not overlapping.
 - **Serving reads from a long-running `mh ui`.** Requires an unauthenticated
   port to stay open, which is the opposite of the blocking work merged in #32.
 - **Letting readers open the SQLite file.** Freezes column names and row order
