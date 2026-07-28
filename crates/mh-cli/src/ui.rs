@@ -224,6 +224,38 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> 
     read_http_request_until(stream, Instant::now() + UI_REQUEST_DEADLINE)
 }
 
+/// Reads into `chunk` without letting the socket block past `deadline`.
+///
+/// The per-read timeout alone cannot hold the budget: a client that delivers a
+/// byte just before the deadline would still buy a full `UI_SOCKET_TIMEOUT` on
+/// the following read. Deriving each timeout from the remaining budget keeps the
+/// whole request bounded by the deadline instead of `deadline + one timeout`.
+/// `Ok(None)` means the budget is exhausted or the client stalled.
+fn read_within_deadline(
+    stream: &mut TcpStream,
+    chunk: &mut [u8],
+    deadline: Instant,
+) -> io::Result<Option<usize>> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Ok(None);
+    }
+    stream.set_read_timeout(Some(remaining.min(UI_SOCKET_TIMEOUT)))?;
+    match stream.read(chunk) {
+        Ok(read) => Ok(Some(read)),
+        // A stalled client is not an I/O failure; let the caller answer 400.
+        Err(err)
+            if matches!(
+                err.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
+}
+
 fn read_http_request_until(
     stream: &mut TcpStream,
     deadline: Instant,
@@ -234,10 +266,9 @@ fn read_http_request_until(
         if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
             break index + 4;
         }
-        if Instant::now() >= deadline {
+        let Some(read) = read_within_deadline(stream, &mut chunk, deadline)? else {
             return Ok(None);
-        }
-        let read = stream.read(&mut chunk)?;
+        };
         if read == 0 {
             return Ok(None);
         }
@@ -293,10 +324,9 @@ fn read_http_request_until(
     }
     let mut body = buffer[header_end..].to_vec();
     while body.len() < content_length {
-        if Instant::now() >= deadline {
+        let Some(read) = read_within_deadline(stream, &mut chunk, deadline)? else {
             return Ok(None);
-        }
-        let read = stream.read(&mut chunk)?;
+        };
         if read == 0 {
             return Ok(None);
         }
@@ -304,6 +334,13 @@ fn read_http_request_until(
         if body.len() > MAX_REQUEST_BODY_BYTES {
             return Ok(None);
         }
+    }
+    // The loops above break on the delimiter/length check before re-testing the
+    // clock, so a request whose last bytes landed past the budget would still
+    // reach here. Reject it rather than serving a request that outlived its
+    // deadline.
+    if Instant::now() >= deadline {
+        return Ok(None);
     }
     body.truncate(content_length);
     Ok(Some(HttpRequest {
@@ -1497,6 +1534,64 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(2),
             "deadline did not cut off a trickling client: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn read_does_not_block_past_the_deadline_when_the_client_stalls() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Send a partial header, then go silent. Without deriving each read
+        // timeout from the remaining budget, the next read would burn the full
+        // UI_SOCKET_TIMEOUT past the deadline.
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\n");
+            thread::sleep(Duration::from_secs(3));
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        accepted.set_read_timeout(Some(UI_SOCKET_TIMEOUT)).unwrap();
+        let started = Instant::now();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(300))
+                .unwrap();
+        let elapsed = started.elapsed();
+
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(request.is_none(), "a stalled request was accepted");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "read blocked past the deadline instead of clamping to it: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn request_completed_after_the_deadline_is_rejected() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\n");
+            // The bytes that complete the header land after the budget is gone.
+            thread::sleep(Duration::from_millis(400));
+            let _ = stream.write_all(b"\r\n");
+            thread::sleep(Duration::from_millis(200));
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(200))
+                .unwrap();
+
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(
+            request.is_none(),
+            "a request whose final bytes arrived past the deadline was accepted"
         );
     }
 
