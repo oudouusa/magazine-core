@@ -3,6 +3,7 @@ use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,6 +22,13 @@ const MAX_MANAGE_DISCOVER_PAGES: u64 = 1_000;
 const MAX_MANAGE_DISCOVER_PER_PAGE: u64 = 1_000;
 const MAX_MANAGE_DISCOVER_RECORDS: u64 = 10_000;
 const MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS: u64 = 3_600;
+/// Per-connection socket deadline. The UI is loopback-only, so a request that
+/// stalls this long is not a slow client but a connection that will never
+/// complete. Without it a single silent connection blocks the whole listener.
+const UI_SOCKET_TIMEOUT: Duration = Duration::from_secs(15);
+/// Upper bound on connections served at once. Excess connections are refused
+/// with 503 rather than queued behind the accept loop.
+const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UiOptions {
@@ -133,17 +141,49 @@ pub(crate) fn run_ui(mut options: UiOptions) -> Result<(), Box<dyn Error>> {
     if options.manage {
         println!("mh ui management mode enabled for this local process");
     }
+    serve_listener(&listener, Arc::new(options));
+    Ok(())
+}
+
+fn serve_listener(listener: &TcpListener, options: Arc<UiOptions>) {
+    let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                if let Err(err) = serve_connection(&options, &mut stream) {
-                    eprintln!("ui request error: {err}");
+                if active.load(Ordering::Acquire) >= MAX_CONCURRENT_CONNECTIONS {
+                    let _ = json_response(503, json!({"error": "too many connections"}))
+                        .write_to(&mut stream);
+                    continue;
+                }
+                active.fetch_add(1, Ordering::AcqRel);
+                // The slot is released by Drop, so both the served and the
+                // failed-to-spawn paths decrement exactly once.
+                let slot = ConnectionSlot(Arc::clone(&active));
+                let options = Arc::clone(&options);
+                let spawned = thread::Builder::new()
+                    .name("mh-ui-connection".to_string())
+                    .spawn(move || {
+                        let _slot = slot;
+                        if let Err(err) = serve_connection(&options, &mut stream) {
+                            eprintln!("ui request error: {err}");
+                        }
+                    });
+                if let Err(err) = spawned {
+                    eprintln!("ui connection spawn error: {err}");
                 }
             }
             Err(err) => eprintln!("ui accept error: {err}"),
         }
     }
-    Ok(())
+}
+
+/// Releases one concurrency slot when dropped.
+struct ConnectionSlot(Arc<AtomicUsize>);
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 fn bind_ui_listener(port: u16) -> io::Result<TcpListener> {
@@ -151,6 +191,8 @@ fn bind_ui_listener(port: u16) -> io::Result<TcpListener> {
 }
 
 fn serve_connection(options: &UiOptions, stream: &mut TcpStream) -> io::Result<()> {
+    stream.set_read_timeout(Some(UI_SOCKET_TIMEOUT))?;
+    stream.set_write_timeout(Some(UI_SOCKET_TIMEOUT))?;
     let request = read_http_request(stream)?;
     let response = match request {
         Some(request) => handle_request(options, &request),
@@ -302,8 +344,32 @@ impl HttpResponse {
     }
 }
 
+/// Rejects any request whose `Host` is not the loopback authority this process
+/// is bound to. A browser coerced into resolving an attacker-controlled name to
+/// 127.0.0.1 still sends that name here, so this is what stops DNS rebinding
+/// from reaching the read-only routes.
+fn require_loopback_host(options: &UiOptions, request: &HttpRequest) -> Option<HttpResponse> {
+    let Some(host) = request.headers.get("host") else {
+        return Some(json_response(
+            400,
+            json!({"error": "Host header is required"}),
+        ));
+    };
+    if !is_allowed_loopback_authority(host, options.bound_port) {
+        return Some(json_response(403, json!({"error": "invalid Host header"})));
+    }
+    None
+}
+
 fn handle_request(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
     let head = request.method == "HEAD";
+    if let Some(rejection) = require_loopback_host(options, request) {
+        return if head {
+            rejection.without_body()
+        } else {
+            rejection
+        };
+    }
     let (path, query) = split_target(&request.target);
     let mut response = match (request.method.as_str(), path) {
         ("GET" | "HEAD", "/") => html_response(&index_html(options)),
@@ -786,6 +852,7 @@ fn json_response(status: u16, value: Value) -> HttpResponse {
         404 => "Not Found",
         409 => "Conflict",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     };
     HttpResponse::new(
@@ -1210,6 +1277,122 @@ mod tests {
             headers,
             body: Vec::new(),
         }
+    }
+
+    #[test]
+    fn read_routes_reject_foreign_host() {
+        let (_dir, options) = fixture();
+        for target in [
+            "/",
+            "/api/summary",
+            "/api/records",
+            "/api/state/known-source-urls",
+            "/api/plugins",
+        ] {
+            let mut request = request("GET", target);
+            request
+                .headers
+                .insert("host".to_string(), "evil.test:8765".to_string());
+            let response = handle_request(&options, &request);
+            assert_eq!(response.status, 403, "{target} accepted a foreign Host");
+        }
+    }
+
+    #[test]
+    fn read_routes_reject_loopback_name_on_wrong_port() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "127.0.0.1:9999".to_string());
+        assert_eq!(handle_request(&options, &request).status, 403);
+    }
+
+    #[test]
+    fn read_routes_require_host_header() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request.headers.remove("host");
+        assert_eq!(handle_request(&options, &request).status, 400);
+    }
+
+    #[test]
+    fn read_routes_accept_localhost_authority() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "localhost:8765".to_string());
+        assert_eq!(handle_request(&options, &request).status, 200);
+    }
+
+    #[test]
+    fn head_with_foreign_host_is_rejected_without_body() {
+        let (_dir, options) = fixture();
+        let mut request = request("HEAD", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "evil.test:8765".to_string());
+        let response = handle_request(&options, &request);
+        assert_eq!(response.status, 403);
+        assert!(response.body.is_empty());
+    }
+
+    #[test]
+    fn silent_connection_does_not_block_other_requests() {
+        let (_dir, mut options) = fixture();
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        options.bound_port = port;
+        thread::spawn(move || serve_listener(&listener, Arc::new(options)));
+
+        // Hold a connection open without ever sending a byte. Before the accept
+        // loop spawned per-connection threads this alone wedged the listener.
+        let _silent = TcpStream::connect(("127.0.0.1", port)).unwrap();
+
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            client,
+            "GET /api/summary HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).unwrap();
+        let text = String::from_utf8_lossy(&response);
+        assert!(
+            text.starts_with("HTTP/1.1 200 OK"),
+            "second request was not served while a silent connection was open: {text}"
+        );
+    }
+
+    #[test]
+    fn serve_connection_arms_socket_timeouts() {
+        let (_dir, options) = fixture();
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\n\r\n");
+            let mut sink = Vec::new();
+            let _ = stream.read_to_end(&mut sink);
+        });
+        let (mut accepted, _) = listener.accept().unwrap();
+        serve_connection(&options, &mut accepted).unwrap();
+        assert_eq!(
+            accepted.read_timeout().unwrap(),
+            Some(UI_SOCKET_TIMEOUT),
+            "read timeout was not armed"
+        );
+        assert_eq!(
+            accepted.write_timeout().unwrap(),
+            Some(UI_SOCKET_TIMEOUT),
+            "write timeout was not armed"
+        );
+        drop(accepted);
+        client.join().unwrap();
     }
 
     fn management_options(db_path: PathBuf, plugins_dir: PathBuf) -> UiOptions {
