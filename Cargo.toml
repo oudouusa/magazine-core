@@ -13,12 +13,18 @@ members = [
 edition = "2021"
 license = "MIT"
 rust-version = "1.94"
+repository = "https://github.com/oudouusa/magazine-core"
 
 [workspace.dependencies]
-mh-db = { path = "crates/mh-db" }
-mh-domain = { path = "crates/mh-domain" }
-mh-fetch = { path = "crates/mh-fetch" }
-mh-host = { path = "crates/mh-host" }
-mh-protocol = { path = "crates/mh-protocol" }
+# Internal crates carry both `path` and `version`. `cargo publish` rejects a
+# path-only dependency ("all dependencies must have a version requirement
+# specified when publishing"); the version is what registry consumers resolve
+# against, while the path keeps local builds on the workspace copy. Bump these
+# together with the crate versions in every release-prep change.
+mh-db = { path = "crates/mh-db", version = "1.1.0" }
+mh-domain = { path = "crates/mh-domain", version = "1.1.0" }
+mh-fetch = { path = "crates/mh-fetch", version = "1.1.0" }
+mh-host = { path = "crates/mh-host", version = "1.1.0" }
+mh-protocol = { path = "crates/mh-protocol", version = "1.1.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

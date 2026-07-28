@@ -8,8 +8,9 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **`1.1.0` release prep**。tag / GitHub Release / push は作成せず、`1.0.0`
-  からの additive minor release commit を準備する。`protocol_version = 1` /
+- **`1.1.0` released**（2026-07-03、stable `1.x` 系の additive minor）。tag と
+  GitHub Release は公開済みで、Linux x86_64 binary tarball / Python SDK wheel /
+  SBOM / `SHA256SUMS.txt` を配布している。`protocol_version = 1` /
   `record_schema_version = 1` は stable `1.x` contract のまま不変。
 - protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
   parity の検証後、generic な discover limit gap として CLI-driven
@@ -37,14 +38,16 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
 - stable tag / Release の作成は `docs/release/1.1.0.md` と
   `docs/release/public-visibility-checklist.md` の evidence gate に従う。
+- crates.io / PyPI へのレジストリ公開は `docs/release/registry-publishing.md` の
+  手順に従う（依存順が固定で、途中からやり直せない）。
 
 ## Standalone quickstart
 
-The currently published linux-x86_64 stable Release artifacts can be verified
-without using repo paths. After `1.1.0` is published, use `RELEASE_TAG=1.1.0`.
+The published linux-x86_64 stable Release artifacts can be verified without using
+repo paths. `1.1.0` is the current stable tag.
 
 ```bash
-RELEASE_TAG=1.0.0 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
+RELEASE_TAG=1.1.0 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
 ```
 
 See `docs/standalone-quickstart.md` for the manual artifact-only flow. Release

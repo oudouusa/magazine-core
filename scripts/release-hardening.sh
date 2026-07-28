@@ -352,6 +352,21 @@ else
   exit "${history_secret_status}"
 fi
 
+# The secret scan above only recognises credential shapes. The public-safe
+# boundary additionally forbids real source sites reaching this repository, so
+# gate on hostnames too: everything must be RFC 2606/6761 reserved, a loopback
+# or private literal, or allowlisted project infrastructure.
+set +e
+python3 "${ROOT}/scripts/check-public-safe-hosts.py" --root "${ROOT}" --json \
+  > "${OUT_DIR}/public-safe-hosts.json"
+public_safe_status=$?
+set -e
+if [[ "${public_safe_status}" -ne 0 ]]; then
+  echo "real-world hostnames found in the public tree; see ${OUT_DIR}/public-safe-hosts.json" >&2
+  python3 "${ROOT}/scripts/check-public-safe-hosts.py" --root "${ROOT}" >&2 || true
+  exit 1
+fi
+
 (
   cd "${ARTIFACT_DIR}"
   checksum_file ./* > checksums.sha256
