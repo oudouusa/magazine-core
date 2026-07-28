@@ -1568,6 +1568,16 @@ mod tests {
         );
     }
 
+    /// Characterizes the observable behaviour: a client whose completing bytes
+    /// arrive after the budget gets 400, not a served request.
+    ///
+    /// What this does *not* isolate: the clamped read times out before those
+    /// bytes land, so the timeout alone satisfies this test — it still passes
+    /// with the post-loop deadline check removed (verified). That check guards
+    /// the narrower case of a read syscall returning after the budget expired,
+    /// which real-socket timing cannot deterministically produce; isolating it
+    /// would need an injectable reader or clock. It is kept as defence in depth,
+    /// not because this test covers it.
     #[test]
     fn request_completed_after_the_deadline_is_rejected() {
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
