@@ -30,6 +30,7 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 - Python SDK — framing / models / runtime / stdout guard / synthetic E2E、stable root plugin-author API（凍結）
 - DB-backed typed state — `known_source_urls` / summary / timestamps / fingerprint
 - safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts / dev-only loopback smoke opt-in
+- read commands — `mh view sources` / `posts`（keyset ページング・URL 非出力）/ `assets`（明示 id のみ）
 - release hardening — binary/wheel checksums / wheel smoke / SBOM / license inventory / secret scan / exact-SHA cut-release preflight
 
 ## 今後
@@ -94,6 +95,7 @@ cargo run -p mh-cli -- discover ./scratch.db ./plugins.d example --max-pages 1 -
 
 - `CONTRIBUTING.md` — scope, dev commands, contract-change rules
 - `docs/protocol-v1.md` — stdio protocol / SourceRecord contract
+- `docs/read-commands.md` — `mh view` の read サブコマンド（sources / posts / assets）
 - `docs/plugin-host.md` — PR3 plugin discovery and host runtime
 - `docs/next-implementation-plan.md` — downstream evidence 後の stabilization plan
 - `docs/python-sdk.md` — Python SDK stable root API and advanced API tiers

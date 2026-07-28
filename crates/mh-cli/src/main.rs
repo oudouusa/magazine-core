@@ -12,6 +12,7 @@ use mh_host::{
 use serde_json::{json, Value};
 
 mod ui;
+mod view;
 
 const DEFAULT_DISCOVER_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -44,6 +45,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         [cmd, rest @ ..] if cmd == "discover" => run_discover(rest),
+        [cmd, rest @ ..] if cmd == "view" => view::run_view(rest),
         [cmd, rest @ ..] if cmd == "ui" => {
             ui::run_ui(ui::parse_ui_options(rest)?)?;
             Ok(())
@@ -200,7 +202,7 @@ fn parse_timeout_seconds(value: &str) -> Result<Duration, Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N] [--dev-allow-loopback-fetch]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N] [--manage]"
+    "Usage:\n  mh init-db <path>\n  mh inspect <path>\n  mh discover <db-path> <plugins-dir> <plugin-id> [--max-pages N] [--max-records N] [--per-page N] [--timeout-seconds N] [--dev-allow-loopback-fetch]\n  mh ui --db <core.db> --plugins-dir <plugins.d> [--port N] [--manage]\n  mh view sources <db-path>\n  mh view posts <db-path> [--limit N] [--after-id N] [--source NAME] [--include-extra]\n  mh view assets <db-path> --post-ids <id,...>"
 }
 
 struct DbStateProvider<'a> {
