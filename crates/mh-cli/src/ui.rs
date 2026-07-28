@@ -3,9 +3,10 @@ use std::error::Error;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mh_db::Database;
 use mh_host::{
@@ -21,6 +22,17 @@ const MAX_MANAGE_DISCOVER_PAGES: u64 = 1_000;
 const MAX_MANAGE_DISCOVER_PER_PAGE: u64 = 1_000;
 const MAX_MANAGE_DISCOVER_RECORDS: u64 = 10_000;
 const MAX_MANAGE_DISCOVER_TIMEOUT_SECONDS: u64 = 3_600;
+/// Per-connection socket deadline. The UI is loopback-only, so a request that
+/// stalls this long is not a slow client but a connection that will never
+/// complete. Without it a single silent connection blocks the whole listener.
+const UI_SOCKET_TIMEOUT: Duration = Duration::from_secs(15);
+/// Absolute budget for reading one request. The per-read timeout above only
+/// bounds a single blocking read, so a client trickling one byte at a time
+/// would otherwise hold a worker (and its concurrency slot) indefinitely.
+const UI_REQUEST_DEADLINE: Duration = Duration::from_secs(30);
+/// Upper bound on connections served at once. Excess connections are refused
+/// with 503 rather than queued behind the accept loop.
+const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UiOptions {
@@ -133,17 +145,49 @@ pub(crate) fn run_ui(mut options: UiOptions) -> Result<(), Box<dyn Error>> {
     if options.manage {
         println!("mh ui management mode enabled for this local process");
     }
+    serve_listener(&listener, Arc::new(options));
+    Ok(())
+}
+
+fn serve_listener(listener: &TcpListener, options: Arc<UiOptions>) {
+    let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                if let Err(err) = serve_connection(&options, &mut stream) {
-                    eprintln!("ui request error: {err}");
+                if active.load(Ordering::Acquire) >= MAX_CONCURRENT_CONNECTIONS {
+                    let _ = json_response(503, json!({"error": "too many connections"}))
+                        .write_to(&mut stream);
+                    continue;
+                }
+                active.fetch_add(1, Ordering::AcqRel);
+                // The slot is released by Drop, so both the served and the
+                // failed-to-spawn paths decrement exactly once.
+                let slot = ConnectionSlot(Arc::clone(&active));
+                let options = Arc::clone(&options);
+                let spawned = thread::Builder::new()
+                    .name("mh-ui-connection".to_string())
+                    .spawn(move || {
+                        let _slot = slot;
+                        if let Err(err) = serve_connection(&options, &mut stream) {
+                            eprintln!("ui request error: {err}");
+                        }
+                    });
+                if let Err(err) = spawned {
+                    eprintln!("ui connection spawn error: {err}");
                 }
             }
             Err(err) => eprintln!("ui accept error: {err}"),
         }
     }
-    Ok(())
+}
+
+/// Releases one concurrency slot when dropped.
+struct ConnectionSlot(Arc<AtomicUsize>);
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 fn bind_ui_listener(port: u16) -> io::Result<TcpListener> {
@@ -151,6 +195,8 @@ fn bind_ui_listener(port: u16) -> io::Result<TcpListener> {
 }
 
 fn serve_connection(options: &UiOptions, stream: &mut TcpStream) -> io::Result<()> {
+    stream.set_read_timeout(Some(UI_SOCKET_TIMEOUT))?;
+    stream.set_write_timeout(Some(UI_SOCKET_TIMEOUT))?;
     let request = read_http_request(stream)?;
     let response = match request {
         Some(request) => handle_request(options, &request),
@@ -175,13 +221,54 @@ struct HttpRequest {
 }
 
 fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> {
+    read_http_request_until(stream, Instant::now() + UI_REQUEST_DEADLINE)
+}
+
+/// Reads into `chunk` without letting the socket block past `deadline`.
+///
+/// The per-read timeout alone cannot hold the budget: a client that delivers a
+/// byte just before the deadline would still buy a full `UI_SOCKET_TIMEOUT` on
+/// the following read. Deriving each timeout from the remaining budget keeps the
+/// whole request bounded by the deadline instead of `deadline + one timeout`.
+/// `Ok(None)` means the budget is exhausted or the client stalled.
+fn read_within_deadline(
+    stream: &mut TcpStream,
+    chunk: &mut [u8],
+    deadline: Instant,
+) -> io::Result<Option<usize>> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Ok(None);
+    }
+    stream.set_read_timeout(Some(remaining.min(UI_SOCKET_TIMEOUT)))?;
+    match stream.read(chunk) {
+        Ok(read) => Ok(Some(read)),
+        // A stalled client is not an I/O failure; let the caller answer 400.
+        Err(err)
+            if matches!(
+                err.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn read_http_request_until(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> io::Result<Option<HttpRequest>> {
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 1024];
     let header_end = loop {
         if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
             break index + 4;
         }
-        let read = stream.read(&mut chunk)?;
+        let Some(read) = read_within_deadline(stream, &mut chunk, deadline)? else {
+            return Ok(None);
+        };
         if read == 0 {
             return Ok(None);
         }
@@ -237,7 +324,9 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> 
     }
     let mut body = buffer[header_end..].to_vec();
     while body.len() < content_length {
-        let read = stream.read(&mut chunk)?;
+        let Some(read) = read_within_deadline(stream, &mut chunk, deadline)? else {
+            return Ok(None);
+        };
         if read == 0 {
             return Ok(None);
         }
@@ -245,6 +334,13 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<Option<HttpRequest>> 
         if body.len() > MAX_REQUEST_BODY_BYTES {
             return Ok(None);
         }
+    }
+    // The loops above break on the delimiter/length check before re-testing the
+    // clock, so a request whose last bytes landed past the budget would still
+    // reach here. Reject it rather than serving a request that outlived its
+    // deadline.
+    if Instant::now() >= deadline {
+        return Ok(None);
     }
     body.truncate(content_length);
     Ok(Some(HttpRequest {
@@ -302,8 +398,32 @@ impl HttpResponse {
     }
 }
 
+/// Rejects any request whose `Host` is not the loopback authority this process
+/// is bound to. A browser coerced into resolving an attacker-controlled name to
+/// 127.0.0.1 still sends that name here, so this is what stops DNS rebinding
+/// from reaching the read-only routes.
+fn require_loopback_host(options: &UiOptions, request: &HttpRequest) -> Option<HttpResponse> {
+    let Some(host) = request.headers.get("host") else {
+        return Some(json_response(
+            400,
+            json!({"error": "Host header is required"}),
+        ));
+    };
+    if !is_allowed_loopback_authority(host, options.bound_port) {
+        return Some(json_response(403, json!({"error": "invalid Host header"})));
+    }
+    None
+}
+
 fn handle_request(options: &UiOptions, request: &HttpRequest) -> HttpResponse {
     let head = request.method == "HEAD";
+    if let Some(rejection) = require_loopback_host(options, request) {
+        return if head {
+            rejection.without_body()
+        } else {
+            rejection
+        };
+    }
     let (path, query) = split_target(&request.target);
     let mut response = match (request.method.as_str(), path) {
         ("GET" | "HEAD", "/") => html_response(&index_html(options)),
@@ -739,12 +859,35 @@ fn completed_run_json(run: &CompletedRun) -> Value {
     })
 }
 
+/// Compares an authority against the loopback address this process is bound to.
+///
+/// Host names are case-insensitive and clients omit the port when it is the
+/// scheme default, so a byte-exact comparison rejects legitimate requests:
+/// `LOCALHOST:8765`, or a bare `127.0.0.1` when the UI was started on `:80`.
+/// Normalizing here does not widen the guard — a foreign name still fails the
+/// host check regardless of case or port.
 fn is_allowed_loopback_authority(value: &str, port: u16) -> bool {
-    value == format!("127.0.0.1:{port}") || value == format!("localhost:{port}")
+    const DEFAULT_HTTP_PORT: u16 = 80;
+    let value = value.trim();
+    let (host, authority_port) = match value.rsplit_once(':') {
+        Some((host, port_text)) => match port_text.parse::<u16>() {
+            Ok(parsed) => (host, parsed),
+            Err(_) => return false,
+        },
+        None => (value, DEFAULT_HTTP_PORT),
+    };
+    authority_port == port
+        && (host.eq_ignore_ascii_case("127.0.0.1") || host.eq_ignore_ascii_case("localhost"))
 }
 
 fn is_allowed_origin(value: &str, port: u16) -> bool {
-    value == format!("http://127.0.0.1:{port}") || value == format!("http://localhost:{port}")
+    let value = value.trim();
+    match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("http://") => {
+            is_allowed_loopback_authority(&value[7..], port)
+        }
+        _ => false,
+    }
 }
 
 fn generate_token() -> Result<String, Box<dyn Error>> {
@@ -786,6 +929,7 @@ fn json_response(status: u16, value: Value) -> HttpResponse {
         404 => "Not Found",
         409 => "Conflict",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     };
     HttpResponse::new(
@@ -1210,6 +1354,282 @@ mod tests {
             headers,
             body: Vec::new(),
         }
+    }
+
+    #[test]
+    fn read_routes_reject_foreign_host() {
+        let (_dir, options) = fixture();
+        for target in [
+            "/",
+            "/api/summary",
+            "/api/records",
+            "/api/state/known-source-urls",
+            "/api/plugins",
+        ] {
+            let mut request = request("GET", target);
+            request
+                .headers
+                .insert("host".to_string(), "evil.test:8765".to_string());
+            let response = handle_request(&options, &request);
+            assert_eq!(response.status, 403, "{target} accepted a foreign Host");
+        }
+    }
+
+    #[test]
+    fn read_routes_reject_loopback_name_on_wrong_port() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "127.0.0.1:9999".to_string());
+        assert_eq!(handle_request(&options, &request).status, 403);
+    }
+
+    #[test]
+    fn read_routes_require_host_header() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request.headers.remove("host");
+        assert_eq!(handle_request(&options, &request).status, 400);
+    }
+
+    #[test]
+    fn read_routes_accept_localhost_authority() {
+        let (_dir, options) = fixture();
+        let mut request = request("GET", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "localhost:8765".to_string());
+        assert_eq!(handle_request(&options, &request).status, 200);
+    }
+
+    #[test]
+    fn head_with_foreign_host_is_rejected_without_body() {
+        let (_dir, options) = fixture();
+        let mut request = request("HEAD", "/api/summary");
+        request
+            .headers
+            .insert("host".to_string(), "evil.test:8765".to_string());
+        let response = handle_request(&options, &request);
+        assert_eq!(response.status, 403);
+        assert!(response.body.is_empty());
+    }
+
+    #[test]
+    fn silent_connection_does_not_block_other_requests() {
+        let (_dir, mut options) = fixture();
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        options.bound_port = port;
+        thread::spawn(move || serve_listener(&listener, Arc::new(options)));
+
+        // Hold a connection open without ever sending a byte. Before the accept
+        // loop spawned per-connection threads this alone wedged the listener.
+        let _silent = TcpStream::connect(("127.0.0.1", port)).unwrap();
+
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            client,
+            "GET /api/summary HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).unwrap();
+        let text = String::from_utf8_lossy(&response);
+        assert!(
+            text.starts_with("HTTP/1.1 200 OK"),
+            "second request was not served while a silent connection was open: {text}"
+        );
+    }
+
+    #[test]
+    fn loopback_authority_accepts_case_and_default_port_variants() {
+        // Host names are case-insensitive (RFC 3986 / 7230).
+        assert!(is_allowed_loopback_authority("LOCALHOST:8765", 8765));
+        assert!(is_allowed_loopback_authority("LocalHost:8765", 8765));
+        assert!(is_allowed_loopback_authority(" 127.0.0.1:8765 ", 8765));
+        // Clients omit the port when it is the scheme default.
+        assert!(is_allowed_loopback_authority("127.0.0.1", 80));
+        assert!(is_allowed_loopback_authority("localhost", 80));
+        assert!(is_allowed_origin("HTTP://LOCALHOST:8765", 8765));
+        assert!(is_allowed_origin("http://127.0.0.1", 80));
+    }
+
+    #[test]
+    fn loopback_authority_still_rejects_foreign_and_mismatched_authorities() {
+        assert!(!is_allowed_loopback_authority("evil.test:8765", 8765));
+        assert!(!is_allowed_loopback_authority("EVIL.TEST:8765", 8765));
+        // A bare foreign name must not slip through the default-port branch.
+        assert!(!is_allowed_loopback_authority("evil.test", 80));
+        // Port must still match exactly.
+        assert!(!is_allowed_loopback_authority("127.0.0.1:9999", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1:", 8765));
+        assert!(!is_allowed_loopback_authority("127.0.0.1:notaport", 8765));
+        // Only loopback literals, and only over http.
+        assert!(!is_allowed_loopback_authority("127.0.0.2:8765", 8765));
+        assert!(!is_allowed_loopback_authority("[::1]:8765", 8765));
+        // A loopback prefix or suffix must not smuggle a foreign host through.
+        assert!(!is_allowed_loopback_authority(
+            "127.0.0.1:8765@evil.test",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "evil.test:8765#127.0.0.1:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "127.0.0.1.evil.test:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "evil.test:127.0.0.1:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "localhost.evil.test:8765",
+            8765
+        ));
+        assert!(!is_allowed_origin("https://127.0.0.1:8765", 8765));
+        assert!(!is_allowed_origin("http://evil.test:8765", 8765));
+        assert!(!is_allowed_origin("127.0.0.1:8765", 8765));
+    }
+
+    #[test]
+    fn read_stops_at_the_absolute_deadline_even_while_bytes_arrive() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stop = Arc::new(AtomicUsize::new(0));
+        let writer_stop = Arc::clone(&stop);
+        // Trickle header bytes forever: every read succeeds, so a per-read
+        // timeout alone would never fire.
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            while writer_stop.load(Ordering::Acquire) == 0 {
+                if stream.write_all(b"X").is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        accepted
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let started = Instant::now();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(300))
+                .unwrap();
+        let elapsed = started.elapsed();
+
+        stop.store(1, Ordering::Release);
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(request.is_none(), "a never-finished request was accepted");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "deadline did not cut off a trickling client: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn read_does_not_block_past_the_deadline_when_the_client_stalls() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Send a partial header, then go silent. Without deriving each read
+        // timeout from the remaining budget, the next read would burn the full
+        // UI_SOCKET_TIMEOUT past the deadline.
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\n");
+            thread::sleep(Duration::from_secs(3));
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        accepted.set_read_timeout(Some(UI_SOCKET_TIMEOUT)).unwrap();
+        let started = Instant::now();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(300))
+                .unwrap();
+        let elapsed = started.elapsed();
+
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(request.is_none(), "a stalled request was accepted");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "read blocked past the deadline instead of clamping to it: {elapsed:?}"
+        );
+    }
+
+    /// Characterizes the observable behaviour: a client whose completing bytes
+    /// arrive after the budget gets 400, not a served request.
+    ///
+    /// What this does *not* isolate: the clamped read times out before those
+    /// bytes land, so the timeout alone satisfies this test — it still passes
+    /// with the post-loop deadline check removed (verified). That check guards
+    /// the narrower case of a read syscall returning after the budget expired,
+    /// which real-socket timing cannot deterministically produce; isolating it
+    /// would need an injectable reader or clock. It is kept as defence in depth,
+    /// not because this test covers it.
+    #[test]
+    fn request_completed_after_the_deadline_is_rejected() {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let writer = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\n");
+            // The bytes that complete the header land after the budget is gone.
+            thread::sleep(Duration::from_millis(400));
+            let _ = stream.write_all(b"\r\n");
+            thread::sleep(Duration::from_millis(200));
+        });
+
+        let (mut accepted, _) = listener.accept().unwrap();
+        let request =
+            read_http_request_until(&mut accepted, Instant::now() + Duration::from_millis(200))
+                .unwrap();
+
+        drop(accepted);
+        let _ = writer.join();
+
+        assert!(
+            request.is_none(),
+            "a request whose final bytes arrived past the deadline was accepted"
+        );
+    }
+
+    #[test]
+    fn serve_connection_arms_socket_timeouts() {
+        let (_dir, options) = fixture();
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let _ = stream.write_all(b"GET / HTTP/1.1\r\n\r\n");
+            let mut sink = Vec::new();
+            let _ = stream.read_to_end(&mut sink);
+        });
+        let (mut accepted, _) = listener.accept().unwrap();
+        serve_connection(&options, &mut accepted).unwrap();
+        assert_eq!(
+            accepted.read_timeout().unwrap(),
+            Some(UI_SOCKET_TIMEOUT),
+            "read timeout was not armed"
+        );
+        assert_eq!(
+            accepted.write_timeout().unwrap(),
+            Some(UI_SOCKET_TIMEOUT),
+            "write timeout was not armed"
+        );
+        drop(accepted);
+        client.join().unwrap();
     }
 
     fn management_options(db_path: PathBuf, plugins_dir: PathBuf) -> UiOptions {
