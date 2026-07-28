@@ -1435,6 +1435,27 @@ mod tests {
         // Only loopback literals, and only over http.
         assert!(!is_allowed_loopback_authority("127.0.0.2:8765", 8765));
         assert!(!is_allowed_loopback_authority("[::1]:8765", 8765));
+        // A loopback prefix or suffix must not smuggle a foreign host through.
+        assert!(!is_allowed_loopback_authority(
+            "127.0.0.1:8765@evil.test",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "evil.test:8765#127.0.0.1:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "127.0.0.1.evil.test:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "evil.test:127.0.0.1:8765",
+            8765
+        ));
+        assert!(!is_allowed_loopback_authority(
+            "localhost.evil.test:8765",
+            8765
+        ));
         assert!(!is_allowed_origin("https://127.0.0.1:8765", 8765));
         assert!(!is_allowed_origin("http://evil.test:8765", 8765));
         assert!(!is_allowed_origin("127.0.0.1:8765", 8765));
