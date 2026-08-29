@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>sandboxed extension candidate</title>
+  <style nonce="sandboxed-spike">body { font-family: sans-serif; }</style>
+</head>
+<body>
+  <h2>Sandboxed iframe with narrow broker</h2>
+  <script nonce="sandboxed-spike">
+  (() => {
+    'use strict';
+    const CHANNEL = 'mh-ui-extension-isolation-spike-v1';
+    const galleryRequestId = 'synthetic-gallery-read-001';
+    const graphRequestId = 'synthetic-graph-read-001';
+    const result = {};
+    const reads = {};
+    const stunPort = new URLSearchParams(window.location.search).get('stun_port');
+    let reported = false;
+
+    try {
+      void window.parent.document.body;
+      result.parent_dom_blocked = false;
+    } catch (_error) {
+      result.parent_dom_blocked = true;
+    }
+
+    try {
+      result.token_unreadable = !window.parent.document
+        .querySelector('meta[name="mh-management-token"]')?.content;
+    } catch (_error) {
+      result.token_unreadable = true;
+    }
+
+    let keyboardAdvanced = false;
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowRight') keyboardAdvanced = true;
+    });
+    window.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight'}));
+    result.keyboard_navigation = keyboardAdvanced;
+    result.deep_link = window.location.hash === '#work=synthetic-work-001';
+
+    const webRtcProbe = (async () => {
+      result.webrtc_api_available = typeof RTCPeerConnection === 'function';
+      if (!result.webrtc_api_available || !stunPort) return;
+      const connection = new RTCPeerConnection({
+        iceServers: [{urls: `stun:127.0.0.1:${stunPort}`}],
+      });
+      connection.createDataChannel('synthetic-probe');
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      result.webrtc_probe_started = true;
+      setTimeout(() => connection.close(), 1000);
+    })();
+
+    Promise.all([
+      webRtcProbe,
+      fetch('/api/manage/mutate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}',
+      }).then(
+        () => { result.direct_management_blocked = false; },
+        () => { result.direct_management_blocked = true; },
+      ),
+      fetch('https://example.invalid/blocked-by-csp').then(
+        () => { result.outbound_blocked = false; },
+        () => { result.outbound_blocked = true; },
+      ),
+    ]).then(() => {
+      window.parent.postMessage({
+        channel: CHANNEL,
+        type: 'read',
+        request_id: galleryRequestId,
+        operation: 'gallery.list',
+      }, '*');
+      window.parent.postMessage({
+        channel: CHANNEL,
+        type: 'read',
+        request_id: graphRequestId,
+        operation: 'graph.detail',
+        key: 'synthetic-work-001',
+      }, '*');
+    });
+
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (
+        event.source !== window.parent ||
+        !message ||
+        message.channel !== CHANNEL ||
+        message.type !== 'read-result'
+      ) {
+        return;
+      }
+      const payload = message.payload;
+      if (message.request_id === galleryRequestId) {
+        reads.gallery = message.ok === true &&
+          payload?.generation === 'synthetic-generation-001' &&
+          payload?.items?.length === 2 &&
+          payload?.items?.[0]?.key === 'gallery-001';
+      } else if (message.request_id === graphRequestId) {
+        reads.graph = message.ok === true &&
+          payload?.ready === true &&
+          payload?.generation === 'synthetic-generation-001' &&
+          payload?.work?.key === 'synthetic-work-001';
+      } else {
+        return;
+      }
+      if (!reported && reads.gallery === true && reads.graph === true) {
+        reported = true;
+        result.gallery_via_broker = true;
+        result.graph_via_broker = true;
+        result.read_via_broker = true;
+        window.parent.postMessage({
+          channel: CHANNEL,
+          type: 'result',
+          result,
+        }, '*');
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
