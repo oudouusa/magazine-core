@@ -11,6 +11,10 @@ description = "Command-line tools for magazine-core"
 name = "mh"
 path = "src/main.rs"
 
+[[bin]]
+name = "mh-ui-ext"
+path = "src/ui_ext_main.rs"
+
 [dependencies]
 getrandom = "0.2"
 mh-db = { workspace = true }
