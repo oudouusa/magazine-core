@@ -13,6 +13,12 @@ This draft does not propose moving that. It proposes what to build when the
 question is opened, and — more usefully — records what measurement already
 ruled out.
 
+A second, domain-rich downstream UI consumer was observed on 2026-08-29. Its
+public-safe findings are recorded in
+`docs/development/downstream-ui-extension-evidence-2026-08-29.md`. That evidence
+narrows the eventual design, but does not change this draft's status or accepted
+ordering.
+
 ## Why a plugin surface rather than more UI in core
 
 The motivation is dependency containment, and it is the same argument that
@@ -69,8 +75,32 @@ side is better served by a command-line read path — which is what
 for this contract is decomposing that dashboard into a generic shell plus
 private panels. A survey of its routes found roughly four fifths of them are
 private-domain screens. **The contract's shape should be settled against those
-panels, not against a viewer or an agent.** Until that inventory exists, any
-contract is fitted to the wrong consumer.
+panels, not against a viewer or an agent.**
+
+## Evidence update: a graph-backed read-only panel
+
+The 2026-08-29 evidence supplies the first concrete private-panel inventory. The
+panel uses stable opaque deep links and presents one parent entity with members,
+typed relations, containment, and provenance. It is generation-bound and
+read-only; duplicate identities, conflicting summaries, and incomplete
+readiness fail closed.
+
+This panel is materially richer than the gallery, but it does **not** require
+core to understand its domain. Its reusable requirements are:
+
+- stable opaque route identity rather than SQLite integer IDs;
+- generation-coherent reads rather than independently refreshed fragments;
+- namespaced list/detail navigation;
+- fail-closed duplicate and conflict handling;
+- inspectable extension-owned fields;
+- a browser boundary that cannot reach management credentials or arbitrary
+  external origins.
+
+The evidence changes one earlier assumption: the built-in core read API may be
+sufficient for a gallery, but cannot represent every extension-owned read model.
+The eventual design therefore needs either selected core read operations **or**
+an operator-approved, narrowly typed read provider. It still does not need
+arbitrary SQL, host-executed manifest queries, or a domain-specific core schema.
 
 ## Proposed minimum, when the question opens
 
@@ -78,9 +108,13 @@ Three capabilities. Not four.
 
 | capability | what core provides |
 | --- | --- |
-| asset serving | serve a plugin's files under a namespaced route |
-| data | the plugin's client fetches the existing read API; no new data channel |
-| registration | a navigation entry and a route |
+| asset serving | serve a plugin's files under a namespaced, path-confined route |
+| data | selected read-only operations from core or an operator-approved provider; no arbitrary SQL or host-injected query |
+| registration | a navigation entry and a stable namespaced route |
+
+Isolation is a precondition for all three, not an optional fourth capability.
+The extension must not share access to the shell's management token, parent DOM,
+other extension state, management routes, or unrestricted outbound networking.
 
 Deliberately **not** in a first version:
 
@@ -88,7 +122,7 @@ Deliberately **not** in a first version:
   Prototyping this produced three fail-closed defects — a sample configuration
   that failed only past a certain row count, an entry path that escaped its
   plugin directory, and duplicate declarations silently overwriting each other.
-  Every one of them disappears if the plugin simply fetches the read API.
+  Every one of them disappears if the plugin uses a fixed read operation.
 - A new version namespace. Reusing `record_schema_version` for a read projection
   is wrong — that constant describes the record shape plugins *send*, and a
   read projection is a different shape. Either a separate identifier or none.
@@ -100,19 +134,21 @@ Deliberately **not** in a first version:
 
 This is the part that needs the most care, and it is not a dependency question.
 
-`mh ui` currently executes no third-party code. A UI plugin runs JavaScript in
-the operator's browser at the shell's own origin, which means it can reach every
-route the shell can — including the management token embedded in the page when
-`--manage` is active — and it can talk to any external host.
+`mh ui` currently executes no third-party code. A UI plugin running JavaScript
+at the shell's own origin could reach every route the shell can — including the
+management token embedded in the page when `--manage` is active — and could talk
+to any external host.
 
 So the trade is not "risk removed" but "risk moved": from supply chain into
 runtime isolation. That is a defensible trade, but only if the isolation is
 designed rather than assumed. At minimum, before any plugin executes:
 
-- the management token must not be readable from a plugin document
-- the plugin document needs a policy restricting where it may send data
-- `SECURITY.md` needs a section stating plainly that installing a plugin means
-  granting local code execution
+- the management token must not be readable from an extension document;
+- management routes must not be callable through the extension data path;
+- the extension document needs a response policy restricting outbound data;
+- path traversal and duplicate route registration must fail closed;
+- `SECURITY.md` needs a section stating plainly that installing an extension
+  means granting local code execution to its packaged assets.
 
 A related exposure, independent of plugins: a viewer that renders remote images
 makes the operator's browser contact third-party hosts directly, disclosing IP
@@ -131,14 +167,14 @@ viewer do not carry it. That is a real gain, but it is narrower than
 
 ## Open questions for whoever picks this up
 
-1. What do the downstream private panels actually require? Until that inventory
-   exists the contract is being fitted to the wrong consumer.
-2. Same-origin with a restrictive policy, or a sandboxed frame? The second is
-   safer and forecloses some UI patterns. This should be decided by trying the
-   gallery in a sandboxed frame once in a real browser — the prototype
-   verification so far used a DOM shim, which does not model sandbox semantics.
-3. Does the existing read API cover a viewer's needs, or does a viewer need
-   filtering the read path does not have?
+1. Do additional private panels fit registration, isolated assets, and narrowly
+   typed read providers, or do they reveal a fourth genuinely shared capability?
+2. Separate loopback origin with exact CORS, or a sandboxed frame with a narrow
+   `postMessage` broker? Decide by running both synthetic consumers in a real
+   browser. The prototype verification so far used a DOM shim, which does not
+   model origin, sandbox, CORS, or CSP semantics.
+3. What is the smallest provider contract that supports extension-owned read
+   models without exposing arbitrary SQL or promoting their schema into core?
 4. If the October review rules the project a no-go, is a shipped plugin surface
    retained or removed? Cheaper to answer before building than after.
 
@@ -149,3 +185,7 @@ and is not part of it. It embeds real collected data — third-party titles,
 performer names and image URLs — and therefore **must not be committed here**
 under any circumstances. Any example that ever lands in this repository must be
 generated from synthetic fixtures.
+
+The downstream graph panel and its operational implementation likewise remain
+private. Only the generic findings in the linked evidence note are candidates
+for public core work.
