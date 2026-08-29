@@ -59,5 +59,8 @@ jobs:
       - name: python sdk tests
         run: .venv/bin/python -m pytest --rootdir=. sdk/python/tests examples/wordpress-rest-plugin/tests
 
+      - name: ui extension isolation real-browser spike
+        run: .venv/bin/python examples/ui-extension-isolation-spike/verify.py
+
       - name: golden oracle parity
         run: bash conformance/check_golden.sh
