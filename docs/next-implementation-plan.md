@@ -1,6 +1,6 @@
 # next implementation plan
 
-`magazine-core` has prepared the additive `1.2.0` minor release on the stable
+`magazine-core` has prepared the `1.2.1` portability patch on the stable
 `1.x` line (expected GitHub Release artifact set: Linux binary, canonical
 Python wheel, SBOM, and `SHA256SUMS.txt`). `protocol_version = 1` and
 `record_schema_version = 1` are unchanged stable contract identifiers.
@@ -107,8 +107,8 @@ Current status as of 2026-08-31:
 - release artifact consumption proof for the stable base is collected in
   `docs/release/1.0.0.md`, with the public artifact UI smoke path evidenced by
   `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`.
-  `1.1.0` assets were verified after release execution. The 1.2.0 candidate
-  adds the trusted UI artifact gate described in `docs/release/1.2.0.md`.
+  `1.1.0` assets were verified after release execution. The 1.2.1 candidate
+  carries the trusted UI artifact gate described in `docs/release/1.2.1.md`.
 - downstream core-improvement intake is empty after closing private-only
   manifest handling, accepted runtime DDL residual monitoring, and the local
   synthetic `host_fetch` loopback smoke gap out of the core promotion queue.
@@ -123,13 +123,13 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: 1.2.0 Additive Minor Release Prep
+## Current Priority: 1.2.1 Portability Patch Release
 
-Current bounded work prepares `1.2.0` from `main` `2109985` without creating a
-tag or GitHub Release in the prep branch. The release packages the
-contract-neutral trusted `mh-ui-ext` binary and its browser/artifact gates.
+The 1.2.0 release dispatch exposed one macOS-only test-fixture path overflow
+before assets were published. Current bounded work shortens only those fixture
+paths and prepares `1.2.1`; runtime code and stable contracts are unchanged.
 Release execution after merge must run
-`scripts/cut-release.sh 1.2.0 <exact-release-commit-sha>` from a clean checkout
+`scripts/cut-release.sh 1.2.1 <exact-release-commit-sha>` from a clean checkout
 where that commit is reachable from `origin/main`.
 
 Completed `1.0.0` stabilization slices:

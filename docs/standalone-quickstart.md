@@ -21,12 +21,12 @@ distribution channels yet; see
 From a magazine-core checkout, run the release-consuming checker:
 
 ```bash
-RELEASE_TAG=1.2.0 VERIFY_UI=1 VERIFY_TRUSTED_UI=1 \
+RELEASE_TAG=1.2.1 VERIFY_UI=1 VERIFY_TRUSTED_UI=1 \
   bash scripts/verify-standalone-quickstart.sh
 ```
 
 For the current release, require both local UI binaries:
-`RELEASE_TAG=1.2.0 VERIFY_UI=1 VERIFY_TRUSTED_UI=1`.
+`RELEASE_TAG=1.2.1 VERIFY_UI=1 VERIFY_TRUSTED_UI=1`.
 
 The checker creates a temporary directory, downloads the Release assets,
 verifies `SHA256SUMS.txt`, installs the attached SDK wheel into a fresh virtual
@@ -51,12 +51,12 @@ cd magazine-core-quickstart
 Download the Release assets:
 
 ```bash
-release_tag=1.2.0
+release_tag=1.2.1
 base_url="https://github.com/oudouusa/magazine-core/releases/download/${release_tag}"
 
 curl -fsSLO "${base_url}/SHA256SUMS.txt"
 curl -fsSLO "${base_url}/magazine-core-mh-linux-x86_64.tar.gz"
-curl -fsSLO "${base_url}/magazine_core_plugin_sdk-1.2.0-py3-none-any.whl"
+curl -fsSLO "${base_url}/magazine_core_plugin_sdk-1.2.1-py3-none-any.whl"
 curl -fsSLO "${base_url}/sbom.cyclonedx.json"
 sha256sum -c SHA256SUMS.txt
 ```
@@ -67,7 +67,7 @@ Extract the host binary and install the SDK wheel locally:
 tar -xzf magazine-core-mh-linux-x86_64.tar.gz
 python3 -m venv .venv
 .venv/bin/python -m pip install --no-index --no-deps \
-  magazine_core_plugin_sdk-1.2.0-py3-none-any.whl
+  magazine_core_plugin_sdk-1.2.1-py3-none-any.whl
 ./mh --help
 ./mh-ui-ext --help
 ```

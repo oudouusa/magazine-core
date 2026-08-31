@@ -420,7 +420,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!("mh-ui-ext-provider-{stamp}"));
+        // macOS has a shorter sockaddr_un path limit than Linux. Keep the
+        // fixture basename short because CI's TMPDIR may already be long.
+        let directory = std::env::temp_dir().join(format!("mhu-{stamp:x}"));
         fs::create_dir_all(&directory).expect("mkdir");
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("chmod dir");
         let socket_path = directory.join("provider.sock");
@@ -480,7 +482,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!("mh-ui-ext-provider-mode-{stamp}"));
+        let directory = std::env::temp_dir().join(format!("mhm-{stamp:x}"));
         fs::create_dir_all(&directory).expect("mkdir");
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).expect("chmod dir");
         let socket_path = directory.join("provider.sock");

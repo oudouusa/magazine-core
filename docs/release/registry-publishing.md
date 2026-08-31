@@ -26,7 +26,7 @@ Every internal dependency in `[workspace.dependencies]` carries **both** `path`
 and `version`:
 
 ```toml
-mh-domain = { path = "crates/mh-domain", version = "1.2.0" }
+mh-domain = { path = "crates/mh-domain", version = "1.2.1" }
 ```
 
 `cargo publish` rejects a path-only dependency with:
