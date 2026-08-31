@@ -75,7 +75,8 @@ class SpikeServer:
             def do_GET(self) -> None:  # noqa: N802 - stdlib hook
                 parsed = urllib.parse.urlsplit(self.path)
                 if parsed.path == "/":
-                    self._html(shell_html(owner))
+                    query = urllib.parse.parse_qs(parsed.query)
+                    self._html(shell_html(owner, query.get("probe_webrtc") == ["1"]))
                     return
                 if parsed.path == "/api/read/gallery":
                     self._read_json(GALLERY_FIXTURE)
@@ -214,7 +215,8 @@ class SpikeServer:
                 if parsed.path != "/index.html":
                     self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                     return
-                body = separate_html(owner).encode("utf-8")
+                query = urllib.parse.parse_qs(parsed.query)
+                body = separate_html(owner, query.get("probe_webrtc") == ["1"]).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))

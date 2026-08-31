@@ -15,7 +15,9 @@
     const graphRequestId = 'synthetic-graph-read-001';
     const result = {};
     const reads = {};
-    const stunPort = new URLSearchParams(window.location.search).get('stun_port');
+    const query = new URLSearchParams(window.location.search);
+    const stunPort = query.get('stun_port');
+    const probeWebRtc = query.get('probe_webrtc') === '1';
     let reported = false;
 
     try {
@@ -42,14 +44,14 @@
 
     const webRtcProbe = (async () => {
       result.webrtc_api_available = typeof RTCPeerConnection === 'function';
-      if (!result.webrtc_api_available || !stunPort) return;
+      if (!result.webrtc_api_available || !stunPort || !probeWebRtc) return;
       const connection = new RTCPeerConnection({
         iceServers: [{urls: `stun:127.0.0.1:${stunPort}`}],
       });
       connection.createDataChannel('synthetic-probe');
       const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
       result.webrtc_probe_started = true;
-      void connection.setLocalDescription(offer);
       setTimeout(() => connection.close(), 1000);
     })();
 
