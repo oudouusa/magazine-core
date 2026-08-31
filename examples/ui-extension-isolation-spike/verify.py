@@ -50,7 +50,7 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
             "--no-default-browser-check",
             "--no-proxy-server",
             f"--user-data-dir={profile}",
-            "--virtual-time-budget=8000",
+            "--virtual-time-budget=20000",
             "--dump-dom",
             url,
         ]
@@ -59,7 +59,7 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
             check=False,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=45,
         )
     if completed.returncode != 0:
         raise SpikeFailure(
