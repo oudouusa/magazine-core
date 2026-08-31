@@ -33,7 +33,7 @@ def find_browser() -> str:
     raise SpikeFailure("a Chromium-family browser is required for this real-browser gate")
 
 
-def run_browser(browser: str, url: str) -> dict[str, object]:
+def run_browser_once(browser: str, url: str) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="mh-ui-extension-browser-") as profile:
         command = [
             browser,
@@ -84,6 +84,63 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
     return parsed
 
 
+def run_browser(browser: str, url: str) -> dict[str, object]:
+    for attempt in range(1, 4):
+        try:
+            return run_browser_once(browser, url)
+        except SpikeFailure as exc:
+            if "browser result is not JSON: 'pending'" not in str(exc) or attempt == 3:
+                raise
+    raise SpikeFailure("browser verification did not settle")
+
+
+def run_network_probe(
+    browser: str,
+    url: str,
+    sandbox_probe: UdpProbe,
+    separate_probe: UdpProbe,
+) -> tuple[int, int]:
+    for _attempt in range(3):
+        sandbox_probe.reset()
+        separate_probe.reset()
+        with tempfile.TemporaryDirectory(prefix="mh-ui-extension-network-") as profile:
+            process = subprocess.Popen(
+                [
+                    browser,
+                    "--headless=new",
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--disable-background-networking",
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--no-proxy-server",
+                    f"--user-data-dir={profile}",
+                    "--remote-debugging-port=0",
+                    url,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                sandbox_packets = sandbox_probe.wait_for_packet(timeout=5)
+                separate_packets = separate_probe.wait_for_packet(timeout=5)
+            finally:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+        if sandbox_packets > 0 and separate_packets > 0:
+            return sandbox_packets, separate_packets
+    raise SpikeFailure("the real browser did not reproduce the WebRTC outbound bypass")
+
+
 def assert_candidate_result(result: dict[str, object]) -> None:
     expected_true = {
         "sandboxed": (
@@ -94,8 +151,6 @@ def assert_candidate_result(result: dict[str, object]) -> None:
             "read_via_broker",
             "deep_link",
             "keyboard_navigation",
-            "webrtc_api_available",
-            "webrtc_probe_started",
         ),
         "separate": (
             "parent_dom_blocked",
@@ -105,8 +160,6 @@ def assert_candidate_result(result: dict[str, object]) -> None:
             "read_via_exact_cors",
             "deep_link",
             "keyboard_navigation",
-            "webrtc_api_available",
-            "webrtc_probe_started",
         ),
     }
     for candidate, keys in expected_true.items():
@@ -176,26 +229,23 @@ def main() -> int:
             sandbox_stun_port=sandbox_probe.port,
             separate_stun_port=separate_probe.port,
         ) as server:
-            url = f"{server.state.shell_origin}/#work=synthetic-work-001"
-            first = run_browser(browser, url)
+            verification_url = (
+                f"{server.state.shell_origin}/?probe_webrtc=0#work=synthetic-work-001"
+            )
+            network_url = (
+                f"{server.state.shell_origin}/?probe_webrtc=1#work=synthetic-work-001"
+            )
+            first = run_browser(browser, verification_url)
             assert_candidate_result(first)
-            first_sandbox_packets = sandbox_probe.wait_for_packet()
-            first_separate_packets = separate_probe.wait_for_packet()
-            if first_sandbox_packets < 1 or first_separate_packets < 1:
-                raise SpikeFailure(
-                    "the real browser did not reproduce the WebRTC outbound bypass"
-                )
+            first_sandbox_packets, first_separate_packets = run_network_probe(
+                browser, network_url, sandbox_probe, separate_probe
+            )
 
-            sandbox_probe.reset()
-            separate_probe.reset()
-            second = run_browser(browser, url)
+            second = run_browser(browser, verification_url)
             assert_candidate_result(second)
-            second_sandbox_packets = sandbox_probe.wait_for_packet()
-            second_separate_packets = separate_probe.wait_for_packet()
-            if second_sandbox_packets < 1 or second_separate_packets < 1:
-                raise SpikeFailure(
-                    "the reload gate did not reproduce the WebRTC outbound bypass"
-                )
+            second_sandbox_packets, second_separate_packets = run_network_probe(
+                browser, network_url, sandbox_probe, separate_probe
+            )
 
     summary = {
         "browser": Path(browser).name,

@@ -5,12 +5,16 @@ import json
 from common import CHANNEL, GALLERY_FIXTURE, GRAPH_FIXTURE, HOST, SYNTHETIC_TOKEN
 
 
-def shell_html(self: object) -> str:
+def shell_html(self: object, probe_webrtc: bool) -> str:
     sandbox_src = (
         "/extensions/sandboxed/sandboxed.html"
-        f"?stun_port={self.sandbox_stun_port}#work=synthetic-work-001"
+        f"?stun_port={self.sandbox_stun_port}&probe_webrtc={int(probe_webrtc)}"
+        "#work=synthetic-work-001"
     )
-    separate_src = f"{self.state.separate_origin}/index.html#work=synthetic-work-001"
+    separate_src = (
+        f"{self.state.separate_origin}/index.html?probe_webrtc={int(probe_webrtc)}"
+        "#work=synthetic-work-001"
+    )
     gallery_json = json.dumps(GALLERY_FIXTURE, separators=(",", ":"))
     graph_json = json.dumps(GRAPH_FIXTURE, separators=(",", ":"))
     return f"""<!doctype html>
@@ -115,7 +119,7 @@ def shell_html(self: object) -> str:
 """
 
 
-def separate_html(self: object) -> str:
+def separate_html(self: object, probe_webrtc: bool) -> str:
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -131,6 +135,7 @@ def separate_html(self: object) -> str:
     const CHANNEL = {json.dumps(CHANNEL)};
     const shellOrigin = {json.dumps(self.state.shell_origin)};
     const result = {{}};
+    const probeWebRtc = {json.dumps(probe_webrtc)};
 
     try {{
       void window.parent.document.body;
@@ -156,7 +161,7 @@ def separate_html(self: object) -> str:
 
     const webRtcProbe = (async () => {{
       result.webrtc_api_available = typeof RTCPeerConnection === 'function';
-      if (!result.webrtc_api_available) return;
+      if (!result.webrtc_api_available || !probeWebRtc) return;
       const connection = new RTCPeerConnection({{
         iceServers: [{{urls: 'stun:{HOST}:{self.separate_stun_port}'}}],
       }});

@@ -5,6 +5,19 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-31
+
+### Fixed
+
+- Shortened Unix socket fixture paths so the trusted provider permission test
+  also fits macOS `sockaddr_un` limits when CI supplies a long temporary root.
+- Separated the browser isolation DOM assertions from the bounded WebRTC UDP
+  observation so slow ICE completion cannot leave the CI result at `pending`.
+
+### Compatibility
+
+- Runtime behavior and all four stable contracts are unchanged from 1.2.0.
+
 ## [1.2.0] - 2026-08-31
 
 ### Added
@@ -188,6 +201,7 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[1.2.1]: https://github.com/oudouusa/magazine-core/releases/tag/1.2.1
 [1.2.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.2.0
 [1.1.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.1.0
 [1.0.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.0.0
