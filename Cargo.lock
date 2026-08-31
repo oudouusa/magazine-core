@@ -487,7 +487,7 @@ checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
 name = "mh-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "getrandom 0.2.17",
  "mh-db",
@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "mh-db"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "mh-domain",
  "rusqlite",
@@ -508,7 +508,7 @@ dependencies = [
 
 [[package]]
 name = "mh-domain"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "mh-fetch"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64",
  "reqwest",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "mh-host"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "libc",
  "mh-domain",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "mh-protocol"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
