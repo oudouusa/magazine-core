@@ -4,7 +4,7 @@
 //! typed plugin->host requests, spool `record` notifications in memory, and
 //! clean up the plugin process group.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::io;
@@ -33,13 +33,31 @@ pub const HOST_MAX_RECORD_BYTES: usize = 32 * 1024 * 1024;
 pub const HOST_MAX_LOG_BYTES: usize = 1024 * 1024;
 
 /// Runtime definition loaded from `plugins.d/*.json`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PluginDefinition {
     pub id: String,
     pub argv: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub working_dir: Option<PathBuf>,
     pub manifest_path: PathBuf,
+}
+
+impl std::fmt::Debug for PluginDefinition {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let env_keys = self
+            .env
+            .keys()
+            .map(|key| redact_env_key(key))
+            .collect::<BTreeSet<_>>();
+        formatter
+            .debug_struct("PluginDefinition")
+            .field("id", &self.id)
+            .field("argv", &self.argv)
+            .field("env_keys", &env_keys)
+            .field("working_dir", &self.working_dir)
+            .field("manifest_path", &self.manifest_path)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +67,8 @@ struct PluginDefinitionFile {
     argv: Vec<String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    #[serde(default)]
+    env_from: Vec<String>,
     working_dir: Option<String>,
 }
 
@@ -115,6 +135,20 @@ pub fn discover_plugins(dir: impl AsRef<Path>) -> Result<Vec<PluginDefinition>, 
                 path.display()
             )));
         }
+        let environment_errors = environment_declaration_errors(&parsed.env, &parsed.env_from);
+        if !environment_errors.is_empty() {
+            return Err(HostError::Discovery(format!(
+                "{}: {}",
+                display_file_name(&path),
+                environment_errors.join("; ")
+            )));
+        }
+        let mut plugin_env = parsed.env;
+        for key in parsed.env_from {
+            if let Ok(value) = env::var(&key) {
+                plugin_env.insert(key, value);
+            }
+        }
         let id = parsed
             .id
             .or(parsed.source_name)
@@ -148,7 +182,7 @@ pub fn discover_plugins(dir: impl AsRef<Path>) -> Result<Vec<PluginDefinition>, 
         plugins.push(PluginDefinition {
             id,
             argv: parsed.argv,
-            env: parsed.env,
+            env: plugin_env,
             working_dir,
             manifest_path: path,
         });
@@ -218,6 +252,10 @@ pub fn inspect_plugin_manifests(
         if parsed.argv.is_empty() {
             errors.push("argv is empty".to_string());
         }
+        errors.extend(environment_declaration_errors(
+            &parsed.env,
+            &parsed.env_from,
+        ));
         let id = parsed
             .id
             .clone()
@@ -241,6 +279,14 @@ pub fn inspect_plugin_manifests(
                 WorkingDirKind::Relative
             }
         });
+        let env_keys = parsed
+            .env
+            .keys()
+            .chain(&parsed.env_from)
+            .map(|key| redact_env_key(key))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         inspections.push(PluginManifestInspection {
             file_name,
             id,
@@ -251,7 +297,7 @@ pub fn inspect_plugin_manifests(
                 .iter()
                 .map(|arg| redact_manifest_arg(arg))
                 .collect(),
-            env_keys: parsed.env.keys().map(|key| redact_env_key(key)).collect(),
+            env_keys,
             working_dir,
             status: PluginManifestStatus::Valid,
             errors,
@@ -1493,6 +1539,46 @@ fn display_file_name(path: &Path) -> String {
         .to_string()
 }
 
+fn environment_declaration_errors(
+    literal: &BTreeMap<String, String>,
+    inherited: &[String],
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    let literal_names = literal
+        .keys()
+        .map(|key| key.to_ascii_uppercase())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    for key in inherited {
+        if !valid_environment_name(key) {
+            errors.push(format!(
+                "env_from contains invalid environment variable name {}",
+                redact_env_key(key)
+            ));
+        }
+        let normalized = key.to_ascii_uppercase();
+        if !seen.insert(normalized.clone()) {
+            errors.push(format!(
+                "environment variable {} is duplicated in env_from",
+                redact_env_key(key)
+            ));
+        }
+        if literal_names.contains(&normalized) {
+            errors.push(format!(
+                "environment variable {} is declared in both env and env_from",
+                redact_env_key(key)
+            ));
+        }
+    }
+    errors
+}
+
+fn valid_environment_name(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    matches!(bytes.next(), Some(first) if first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
 fn redact_manifest_arg(value: &str) -> String {
     if value.contains('/') || value.contains('\\') || Path::new(value).is_absolute() {
         Path::new(value)
@@ -1736,6 +1822,99 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETUR
     }
 
     #[test]
+    fn inherited_environment_reaches_only_allowlisted_child() {
+        let dir = temp_dir("env-from");
+        let marker = dir.join("environment.json");
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let allowed = format!("MH_HOST_ALLOWED_{stamp}");
+        let missing = format!("MH_HOST_MISSING_{stamp}");
+        let blocked = format!("MH_HOST_BLOCKED_{stamp}");
+        let plugin = write_plugin(
+            &dir,
+            r#"
+import json
+import os
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump([os.environ.get(sys.argv[2]), os.environ.get(sys.argv[3]), os.environ.get(sys.argv[4])], output)
+"#,
+        );
+        unsafe {
+            env::set_var(&allowed, "allowed-value");
+            env::remove_var(&missing);
+            env::set_var(&blocked, "blocked-value");
+        }
+        fs::write(
+            dir.join("synthetic.json"),
+            serde_json::to_string_pretty(&json!({
+                "id": "synthetic",
+                "argv": [python(), plugin, marker, allowed, missing, blocked],
+                "env_from": [allowed, missing]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let plugins = discover_plugins(&dir).unwrap();
+        let debug = format!("{:?}", plugins[0]);
+        assert!(!debug.contains("allowed-value"));
+        let mut process = PluginProcess::spawn(&plugins[0]).unwrap();
+        let status = process.child.wait().unwrap();
+        assert!(status.success());
+        drop(process);
+        let values: Vec<Option<String>> =
+            serde_json::from_slice(&fs::read(&marker).unwrap()).unwrap();
+        assert_eq!(values, vec![Some("allowed-value".to_string()), None, None]);
+
+        unsafe {
+            env::remove_var(&allowed);
+            env::remove_var(&blocked);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_non_utf8_environment_is_skipped() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let dir = temp_dir("env-from-non-utf8");
+        let key = format!(
+            "MH_HOST_NON_UTF8_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        unsafe {
+            env::set_var(&key, OsString::from_vec(vec![0xff]));
+        }
+        fs::write(
+            dir.join("synthetic.json"),
+            serde_json::to_vec_pretty(&json!({
+                "id": "synthetic",
+                "argv": [python()],
+                "env_from": [key]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let plugins = discover_plugins(&dir).unwrap();
+        assert!(!plugins[0].env.contains_key(&key));
+
+        unsafe {
+            env::remove_var(&key);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn rejects_duplicate_plugin_ids() {
         let dir = temp_dir("duplicate-id");
         let plugin = write_plugin(&dir, "print('not executed')\n");
@@ -1767,6 +1946,7 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETUR
                 "id": "synthetic",
                 "argv": [python(), plugin, marker],
                 "env": {"API_TOKEN": "super-secret", "PLAIN": "visible"},
+                "env_from": ["SYNTHETIC_TOKEN", "VISIBLE_MODE"],
                 "working_dir": secret_dir
             }))
             .unwrap(),
@@ -1791,8 +1971,10 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETUR
         assert!(!serialized.contains("super-secret"));
         assert!(!serialized.contains("visible"));
         assert!(!serialized.contains("API_TOKEN"));
+        assert!(!serialized.contains("SYNTHETIC_TOKEN"));
         assert!(serialized.contains("<redacted-secret-env>"));
         assert!(serialized.contains("PLAIN"));
+        assert!(serialized.contains("VISIBLE_MODE"));
         assert!(!serialized.contains(secret_dir.to_string_lossy().as_ref()));
         assert!(serialized.contains("<path:plugin.py>"));
         assert!(!marker.exists());
@@ -1817,6 +1999,33 @@ write_frame({"jsonrpc": "2.0", "id": discover["id"], "result": {"records": RETUR
             .iter()
             .any(|error| error.contains("invalid json"))));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn inherited_environment_declarations_fail_closed() {
+        let literal = BTreeMap::from([("PLAIN".to_string(), "one".to_string())]);
+        assert!(!environment_declaration_errors(&literal, &["plain".to_string()]).is_empty());
+        assert!(!environment_declaration_errors(
+            &BTreeMap::new(),
+            &["DUPLICATE".to_string(), "duplicate".to_string()]
+        )
+        .is_empty());
+        assert!(
+            !environment_declaration_errors(&BTreeMap::new(), &["INVALID-NAME".to_string()])
+                .is_empty()
+        );
+
+        let missing = format!(
+            "MH_HOST_MISSING_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        unsafe {
+            env::remove_var(&missing);
+        }
+        assert!(environment_declaration_errors(&BTreeMap::new(), &[missing]).is_empty());
     }
 
     #[test]
