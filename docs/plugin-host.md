@@ -13,6 +13,7 @@ message loop を実行する。site-specific adapter や proxy/cookie/challenge 
   "id": "synthetic",
   "argv": ["/absolute/path/to/plugin", "--flag"],
   "env": {"KEY": "value"},
+  "env_from": ["API_TOKEN"],
   "working_dir": "."
 }
 ```
@@ -21,7 +22,12 @@ message loop を実行する。site-specific adapter や proxy/cookie/challenge 
 - `id` は CLI 選択用。省略時は `source_name`、それも無ければ JSON ファイル名を使う。
 - 同じ `id` が複数の manifest に現れた場合は discovery error にする。CLI は曖昧な plugin 選択をしない。
 - `working_dir` が相対 path の場合、manifest の親 directory から解決する。
-- child env は allowlist。既定で `PATH` と `LANG` を引き継ぎ、manifest の `env` を追加する。
+- child env はallowlist。既定で`PATH`と`LANG`を引き継ぎ、manifestの`env`を追加する。
+  `env_from`は値をmanifestへ保存せず、manifest discovery時に、名前が一致してUTF-8で
+  表現できるhost processの環境変数だけを既存のruntime定義へ追加する。未設定値と
+  非UTF-8値は追加しない。`env_from`の不正名・重複、または`env`との重複は
+  discoveryを失敗させる。
+  `env_from`にないhost環境変数はchildへ渡さない。
 
 ## runtime
 

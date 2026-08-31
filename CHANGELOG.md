@@ -5,6 +5,29 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-31
+
+### Added
+
+- Added optional command-manifest `env_from` names so a one-shot host can pass
+  only explicitly declared parent environment values to a trusted plugin
+  without storing those values in the manifest.
+
+### Security
+
+- Inherited environment declarations reject invalid names, case-insensitive
+  duplicates, and overlap with literal `env` during manifest discovery.
+  Missing and non-UTF-8 optional values are skipped.
+  Undeclared parent variables remain unavailable after `env_clear`, and
+  manifest inspection and `PluginDefinition` debug output never expose values.
+
+### Compatibility
+
+- Existing command manifests and the public Rust `PluginDefinition` shape remain
+  valid. `protocol_version = 1`,
+  `record_schema_version = 1`, the Python SDK root API, and the canonical
+  SQLite schema are unchanged from 1.2.1.
+
 ## [1.2.1] - 2026-08-31
 
 ### Fixed
@@ -201,6 +224,7 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[1.3.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.3.0
 [1.2.1]: https://github.com/oudouusa/magazine-core/releases/tag/1.2.1
 [1.2.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.2.0
 [1.1.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.1.0

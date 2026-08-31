@@ -1,6 +1,6 @@
 # next implementation plan
 
-`magazine-core` has prepared the `1.2.1` portability patch on the stable
+`magazine-core` has prepared the `1.3.0` inherited-environment release on the stable
 `1.x` line (expected GitHub Release artifact set: Linux binary, canonical
 Python wheel, SBOM, and `SHA256SUMS.txt`). `protocol_version = 1` and
 `record_schema_version = 1` are unchanged stable contract identifiers.
@@ -107,8 +107,9 @@ Current status as of 2026-08-31:
 - release artifact consumption proof for the stable base is collected in
   `docs/release/1.0.0.md`, with the public artifact UI smoke path evidenced by
   `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`.
-  `1.1.0` assets were verified after release execution. The 1.2.1 candidate
-  carries the trusted UI artifact gate described in `docs/release/1.2.1.md`.
+  `1.1.0` and `1.2.1` assets were verified after release execution. The 1.3.0
+  candidate retains those gates and adds the command-manifest environment
+  boundary described in `docs/release/1.3.0.md`.
 - downstream core-improvement intake is empty after closing private-only
   manifest handling, accepted runtime DDL residual monitoring, and the local
   synthetic `host_fetch` loopback smoke gap out of the core promotion queue.
@@ -123,15 +124,16 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: 1.2.1 Portability Patch Release
+## Current Priority: 1.3.0 Inherited Environment Release
 
-The 1.2.0 release dispatch exposed one macOS-only test-fixture path overflow
-before assets were published. Current bounded work shortens only those fixture
-paths and prepares `1.2.1`. It also separates the browser gate's DOM assertions
-from its bounded WebRTC UDP observation; runtime code and stable contracts are
-unchanged.
+Artifact-only downstream evidence showed that the host's second `env_clear`
+correctly blocked all parent values but provided no value-free way to allow a
+trusted plugin credential. Current bounded work adds only optional `env_from`
+names to the command manifest. It preserves the protocol, SDK, and DB contracts
+and rejects invalid names or duplicate declarations during manifest discovery
+while skipping missing or non-UTF-8 optional values.
 Release execution after merge must run
-`scripts/cut-release.sh 1.2.1 <exact-release-commit-sha>` from a clean checkout
+`scripts/cut-release.sh 1.3.0 <exact-release-commit-sha>` from a clean checkout
 where that commit is reachable from `origin/main`.
 
 Completed `1.0.0` stabilization slices:
