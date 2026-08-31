@@ -43,6 +43,28 @@ shared remote host unless a separate security-boundary change defines and
 implements an explicit remote-access model. Loopback binding and read-only
 browsing are the security assumptions for the default UI.
 
+## Trusted UI extension host
+
+`mh-ui-ext` is a separate, explicit opt-in binary. It binds only to
+`127.0.0.1`, is read-only, accepts no management token or management/write
+route, and requires an operator-started owner-only Unix socket provider. The
+provider is never started from an extension manifest. Its provider channel is
+bounded and generation-bound, and exposes only the fixed `gallery.list` and
+`graph.detail` reads.
+
+Installing or enabling an extension grants its packaged JavaScript trusted local
+code status. That code can read data delivered through the broker and can
+transmit that data to external systems. The shell's sandboxed iframe, strict
+CSP, and Permissions Policy are useful defense-in-depth controls, but they are
+not a network sandbox and must not be treated as one. The shell and asset
+servers use separate loopback origins, namespaced path-confined assets, and a
+broker that maps a request to the registered iframe window rather than trusting
+an extension name supplied by the message.
+
+Do not run `mh-ui-ext` with extensions that have not been reviewed and
+explicitly approved by the operator. Do not expose either loopback listener
+through a tunnel, reverse proxy, or shared remote host.
+
 Mutating UI operations require an explicit management-mode process opt-in, but
 that opt-in is not sufficient by itself. Before any mutation or local
 process-control route runs, the route also requires an unguessable per-process

@@ -6,10 +6,15 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Command-line tools for magazine-core"
+default-run = "mh"
 
 [[bin]]
 name = "mh"
 path = "src/main.rs"
+
+[[bin]]
+name = "mh-ui-ext"
+path = "src/ui_ext_main.rs"
 
 [dependencies]
 getrandom = "0.2"
