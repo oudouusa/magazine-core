@@ -1,6 +1,6 @@
 # next implementation plan
 
-`magazine-core` is preparing the additive `1.1.0` minor release on the stable
+`magazine-core` has prepared the additive `1.2.0` minor release on the stable
 `1.x` line (expected GitHub Release artifact set: Linux binary, canonical
 Python wheel, SBOM, and `SHA256SUMS.txt`). `protocol_version = 1` and
 `record_schema_version = 1` are unchanged stable contract identifiers.
@@ -72,6 +72,8 @@ Post-release on the current repo:
 - `mh discover --dev-allow-loopback-fetch` allows local synthetic loopback
   smoke while keeping the default SSRF policy fail-closed and preserving the
   `1.x` protocol, SDK root API, and canonical schema contracts.
+- The separate `mh-ui-ext` binary provides a loopback-only trusted extension
+  shell with a fixed read broker; release artifacts include and smoke-test it.
 
 ## Protocol v1 Audit Result
 
@@ -100,17 +102,18 @@ code.
 
 ## Evidence-Driven Queue Status
 
-Current status as of 2026-07-03:
+Current status as of 2026-08-31:
 
 - release artifact consumption proof for the stable base is collected in
   `docs/release/1.0.0.md`, with the public artifact UI smoke path evidenced by
   `docs/development/beta-3-public-artifact-ui-smoke-evidence-2026-07-03.md`.
-  `1.1.0` assets must still be verified after release execution.
+  `1.1.0` assets were verified after release execution. The 1.2.0 candidate
+  adds the trusted UI artifact gate described in `docs/release/1.2.0.md`.
 - downstream core-improvement intake is empty after closing private-only
   manifest handling, accepted runtime DDL residual monitoring, and the local
   synthetic `host_fetch` loopback smoke gap out of the core promotion queue.
 - GitHub open issues, open pull requests, and repository security advisories
-  are empty as of the 2026-07-03 `1.1.0` release-prep owner check.
+  are checked again by the exact-SHA release preflight.
 
 Standing evidence-driven intake remains:
 
@@ -120,14 +123,13 @@ Standing evidence-driven intake remains:
 Do not add speculative core capabilities before a real adapter exposes a
 generic gap.
 
-## Current Priority: 1.1.0 Additive Minor Release Prep
+## Current Priority: 1.2.0 Additive Minor Release Prep
 
-Current bounded work prepares `1.1.0` from `main` `fadf892` without creating a
-tag, GitHub Release, or push in the prep branch. The release packages the
-contract-neutral changes since `1.0.0`: exact-SHA release tooling, a
-repository-only WordPress REST plugin template, and the dev-only loopback
-`host_fetch` smoke opt-in. Release execution after merge must run
-`scripts/cut-release.sh 1.1.0 <exact-release-commit-sha>` from a clean checkout
+Current bounded work prepares `1.2.0` from `main` `2109985` without creating a
+tag or GitHub Release in the prep branch. The release packages the
+contract-neutral trusted `mh-ui-ext` binary and its browser/artifact gates.
+Release execution after merge must run
+`scripts/cut-release.sh 1.2.0 <exact-release-commit-sha>` from a clean checkout
 where that commit is reachable from `origin/main`.
 
 Completed `1.0.0` stabilization slices:

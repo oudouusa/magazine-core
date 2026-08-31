@@ -19,8 +19,8 @@ The script performs:
 
 - Rust fmt, clippy, workspace tests, and golden oracle parity.
 - Python SDK editable install and pytest in an isolated venv under `dist/`.
-- Release build of the `mh` CLI.
-- Platform-specific tarball packaging for the `mh` binary.
+- Release build of the `mh` CLI and `mh-ui-ext` trusted extension host.
+- Platform-specific tarball packaging for both `mh` and `mh-ui-ext` binaries.
 - Python SDK wheel packaging and install smoke from a second clean venv.
 - Sanitized Cargo/Python dependency inventory.
 - CycloneDX JSON SBOM generation from Cargo metadata and Python package
@@ -31,10 +31,12 @@ The script performs:
   shapes.
 - SHA256 generation for release artifacts (`checksums.sha256` and the public
   release asset name `SHA256SUMS.txt`).
-- Linux release artifact quickstart with local UI smoke. The checker consumes
+- Linux release artifact quickstart with local UI and trusted extension smoke.
+  The checker consumes
   the freshly generated tarball, wheel, and `SHA256SUMS.txt` through the same
   artifact path used by public cold-start verification, then proves read-only
-  UI browsing and guarded `--manage` discover.
+  UI browsing, guarded `--manage` discover, and the fixed gallery-to-graph
+  broker path in real Chrome.
 - Version discipline check for Cargo package versions, the Python SDK project
   metadata that determines wheel versioning, and release tag / changelog /
   release-note agreement when a version tag is provided.
@@ -58,7 +60,7 @@ checkout, then dispatch `Release hardening` with `release_tag` set. After both
 hardening jobs pass, the workflow downloads the Linux hardening artifact and
 uploads:
 
-- `magazine-core-mh-linux-x86_64.tar.gz`
+- `magazine-core-mh-linux-x86_64.tar.gz`（`mh`と`mh-ui-ext`を収録）
 - the canonical `magazine_core_plugin_sdk-*.whl`
 - `sbom.cyclonedx.json`
 - `SHA256SUMS.txt`
@@ -75,7 +77,9 @@ the just-published public artifacts into a temporary directory, verifies
 `init-db -> discover -> inspect` with the synthetic quickstart plugin. For
 releases whose binary advertises `mh ui`, the same checker also proves local
 read-only UI browse, management disabled in default mode, token/method/bounds
-guards in `--manage` mode, and a guarded management discover.
+guards in `--manage` mode, and a guarded management discover. For releases that
+include `mh-ui-ext`, release hardening additionally requires the artifact-only
+trusted extension gate in real Chrome.
 
 When `release_tag` looks like a release version such as `0.1.0-beta.3`,
 release hardening also requires all Cargo packages, the Python SDK version

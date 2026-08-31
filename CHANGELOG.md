@@ -5,6 +5,33 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-31
+
+### Added
+
+- Added the explicit `mh-ui-ext` binary for trusted local UI extensions. It
+  binds only to IPv4 loopback, serves extension assets on a separate origin,
+  and brokers only bounded `gallery.list` and `graph.detail` reads over an
+  owner-only Unix socket to an operator-started provider.
+- Added a real-Chrome regression that performs gallery-to-graph reads in the
+  same sandboxed iframe and is now part of CI.
+- Added `mh-ui-ext` to the Linux release tarball, CycloneDX SBOM, dependency
+  inventory, checksums, and artifact-consuming trusted UI smoke.
+
+### Fixed
+
+- Fixed the browser broker's graph work-key validation, whose control-character
+  expression was incorrectly escaped in the generated shell JavaScript.
+- Release quickstart verification now auto-detects older artifacts without
+  `mh-ui-ext`, while release hardening requires it for 1.2.0 artifacts.
+- Chrome gate cleanup now terminates and waits for the complete browser process
+  group, preventing profile cleanup races.
+
+### Compatibility
+
+- `protocol_version = 1`, `record_schema_version = 1`, the Python SDK root API,
+  and the canonical SQLite schema are unchanged from 1.1.0.
+
 ## [1.1.0] - 2026-07-03
 
 ### Added
@@ -161,6 +188,7 @@ Release for this tag.
   Release publishes a single canonical wheel.
 - Prebuilt binaries are provided for linux-x86_64 and macos-arm64 only.
 
+[1.2.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.2.0
 [1.1.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.1.0
 [1.0.0]: https://github.com/oudouusa/magazine-core/releases/tag/1.0.0
 [0.1.0-beta.3]: https://github.com/oudouusa/magazine-core/releases/tag/0.1.0-beta.3

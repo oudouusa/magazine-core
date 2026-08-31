@@ -12,7 +12,7 @@ FIXTURE_OUT="${TMP_DIR}/fixture.json"
 
 python3 "${ROOT}/scripts/check-version-discipline.py" --root "${ROOT}" --json > "${CURRENT_OUT}"
 grep -q '"ok": true' "${CURRENT_OUT}"
-grep -q '"package_version": "1.1.0"' "${CURRENT_OUT}"
+grep -q '"package_version": "1.2.0"' "${CURRENT_OUT}"
 
 if python3 "${ROOT}/scripts/check-version-discipline.py" --root "${ROOT}" --release-ref 1.0.0 >"${MISMATCH_OUT}" 2>&1; then
   echo "historical 1.0.0 mismatch unexpectedly passed" >&2

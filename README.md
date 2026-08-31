@@ -8,9 +8,10 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 
 ## ステータス
 
-- **`1.1.0` released**（2026-07-03、stable `1.x` 系の additive minor）。tag と
+- **`1.2.0` released**（2026-08-31、stable `1.x` 系の additive minor）。tag と
   GitHub Release は公開済みで、Linux x86_64 binary tarball / Python SDK wheel /
-  SBOM / `SHA256SUMS.txt` を配布している。`protocol_version = 1` /
+  SBOM / `SHA256SUMS.txt` を配布している。binary tarballには`mh`とloopback-only
+  trusted extension hostの`mh-ui-ext`を含む。`protocol_version = 1` /
   `record_schema_version = 1` は stable `1.x` contract のまま不変。
 - protocol v1 foundation 実装済み。host-fetch・multi-stage discovery・extension
   parity の検証後、generic な discover limit gap として CLI-driven
@@ -32,12 +33,13 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 - DB-backed typed state — `known_source_urls` / summary / timestamps / fingerprint
 - safe host fetch — allowed domains / redirect validation / DNS IP checks / timeouts / dev-only loopback smoke opt-in
 - read commands — `mh view sources` / `posts`（keyset ページング・URL 非出力）/ `assets`（明示 id のみ）
+- trusted UI host — separate `mh-ui-ext` binary / dual loopback origin / fixed read broker / owner-only provider socket
 - release hardening — binary/wheel checksums / wheel smoke / SBOM / license inventory / secret scan / exact-SHA cut-release preflight
 
 ## 今後
 
 - contract 変更は実 plugin が generic な不足を示したときのみ、evidence-driven に行う。
-- stable tag / Release の作成は `docs/release/1.1.0.md` と
+- stable tag / Release の作成は `docs/release/1.2.0.md` と
   `docs/release/public-visibility-checklist.md` の evidence gate に従う。
 - crates.io / PyPI へのレジストリ公開は `docs/release/registry-publishing.md` の
   手順に従う（依存順が固定で、途中からやり直せない）。
@@ -45,10 +47,10 @@ Rust host + 言語非依存の stdio plugin protocol + Python SDK。スクレイ
 ## Standalone quickstart
 
 The published linux-x86_64 stable Release artifacts can be verified without using
-repo paths. `1.1.0` is the current stable tag.
+repo paths. `1.2.0` is the current stable tag.
 
 ```bash
-RELEASE_TAG=1.1.0 VERIFY_UI=1 bash scripts/verify-standalone-quickstart.sh
+RELEASE_TAG=1.2.0 VERIFY_UI=1 VERIFY_TRUSTED_UI=1 bash scripts/verify-standalone-quickstart.sh
 ```
 
 See `docs/standalone-quickstart.md` for the manual artifact-only flow. Release
