@@ -33,7 +33,7 @@ def find_browser() -> str:
     raise SpikeFailure("a Chromium-family browser is required for this real-browser gate")
 
 
-def run_browser(browser: str, url: str) -> dict[str, object]:
+def run_browser_once(browser: str, url: str) -> dict[str, object]:
     with tempfile.TemporaryDirectory(prefix="mh-ui-extension-browser-") as profile:
         command = [
             browser,
@@ -50,7 +50,7 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
             "--no-default-browser-check",
             "--no-proxy-server",
             f"--user-data-dir={profile}",
-            "--virtual-time-budget=20000",
+            "--virtual-time-budget=8000",
             "--dump-dom",
             url,
         ]
@@ -59,7 +59,7 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
             check=False,
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=30,
         )
     if completed.returncode != 0:
         raise SpikeFailure(
@@ -82,6 +82,16 @@ def run_browser(browser: str, url: str) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise SpikeFailure("browser result must be an object")
     return parsed
+
+
+def run_browser(browser: str, url: str) -> dict[str, object]:
+    for attempt in range(1, 4):
+        try:
+            return run_browser_once(browser, url)
+        except SpikeFailure as exc:
+            if "browser result is not JSON: 'pending'" not in str(exc) or attempt == 3:
+                raise
+    raise SpikeFailure("browser verification did not settle")
 
 
 def assert_candidate_result(result: dict[str, object]) -> None:

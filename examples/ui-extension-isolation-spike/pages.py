@@ -162,8 +162,8 @@ def separate_html(self: object) -> str:
       }});
       connection.createDataChannel('synthetic-probe');
       const offer = await connection.createOffer();
-      await connection.setLocalDescription(offer);
       result.webrtc_probe_started = true;
+      void connection.setLocalDescription(offer);
       setTimeout(() => connection.close(), 1000);
     }})();
 
