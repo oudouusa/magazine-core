@@ -121,7 +121,7 @@ fn broker_script(registrations_json: &str) -> String {
   function textOkay(value, limit) {{
     return typeof value === 'string' && value.trim() !== '' &&
       textByteLength(value) <= limit &&
-      !/[\\u0000-\\u001f\\u007f]/.test(value);
+      !/[\u0000-\u001f\u007f]/.test(value);
   }}
   function requestIdOkay(value) {{
     return typeof value === 'string' && /^[A-Za-z0-9_-]{{1,64}}$/.test(value);

@@ -2,7 +2,7 @@
 """Real-Chrome gate for the production ``mh-ui-ext`` trusted host."""
 from __future__ import annotations
 
-import html
+import contextlib
 import http.client
 import json
 import os
@@ -10,17 +10,20 @@ from pathlib import Path
 import re
 import select
 import shutil
+import signal
 import socket
 import struct
 import subprocess
 import tempfile
 import threading
 import time
-import urllib.parse
 
 
 WIRE_SCHEMA = "mh-ui-read-provider.v1"
-HOST_RE = re.compile(r"mh-ui-ext listening on (http://127\.0\.0\.1:(\d+))")
+LOOPBACK = "127.0.0.1"
+HOST_RE = re.compile(
+    r"mh-ui-ext listening on (http://" + re.escape(LOOPBACK) + r":(\d+))"
+)
 
 
 class GateFailure(RuntimeError):
@@ -179,11 +182,8 @@ PLUGIN_HTML = r'''<!doctype html><meta charset="utf-8"><title>gate</title>
     let parentBlocked = false;
     try { void parent.document.body; } catch (_error) { parentBlocked = true; }
     if (!parentBlocked) return;
-    if ("__OPERATION__" === "graph.detail") {
-      await request("graph.detail", {work_key: "stable-work-001"});
-    } else {
-      await request("gallery.list", {limit: 1, offset: 0});
-    }
+    const gallery = await request("gallery.list", {limit: 1, offset: 0});
+    await request("graph.detail", {work_key: gallery.items[0].primary_work_key});
   }
   run().catch(() => {});
 })();
@@ -233,24 +233,48 @@ def wait_for_host(process: subprocess.Popen[str]) -> tuple[str, int]:
     raise GateFailure(f"mh-ui-ext did not become ready: {stderr[-2000:]}")
 
 
-def run_browser(browser: str, origin: str) -> None:
+def run_browser(
+    browser: str,
+    origin: str,
+    provider: Provider,
+    *,
+    gallery: int,
+    graph: int,
+) -> None:
     with tempfile.TemporaryDirectory(prefix="mh-ui-ext-chrome-") as profile:
-        completed = subprocess.run([
+        process = subprocess.Popen([
             browser,
             "--headless=new", "--no-sandbox", "--disable-gpu",
             "--disable-dev-shm-usage", "--disable-background-networking",
             "--disable-default-apps", "--disable-extensions", "--disable-sync",
             "--metrics-recording-only", "--no-first-run",
             "--no-default-browser-check", "--no-proxy-server",
-            f"--user-data-dir={profile}", "--virtual-time-budget=10000",
-            "--dump-dom", origin,
-        ], capture_output=True, text=True, timeout=30, check=False)
-    if completed.returncode != 0:
-        raise GateFailure(
-            f"browser failed with {completed.returncode}: {completed.stderr[-2000:]}"
-        )
-    if "mh-ui-ext-shell" not in html.unescape(completed.stdout):
-        raise GateFailure("browser did not load the production shell")
+            f"--user-data-dir={profile}", origin,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            provider.wait_for(gallery=gallery, graph=graph)
+            if process.poll() is not None:
+                raise GateFailure(f"browser exited early with {process.returncode}")
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                try:
+                    os.killpg(process.pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)
+            else:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
 
 
 def main() -> int:
@@ -276,9 +300,7 @@ def main() -> int:
             encoding="utf-8",
         )
         gate_script = extension / "gate.js"
-        gate_script.write_text(
-            plugin_script.replace("__OPERATION__", "gallery.list"), encoding="utf-8"
-        )
+        gate_script.write_text(plugin_script, encoding="utf-8")
         socket_dir = temp / "provider"
         socket_dir.mkdir(mode=0o700)
         socket_path = socket_dir / "read.sock"
@@ -303,7 +325,7 @@ def main() -> int:
             if "allow-same-origin" in shell_body:
                 raise GateFailure("production shell enabled iframe same-origin access")
             asset_match = re.search(
-                r'src="http://127\.0\.0\.1:(\d+)/extensions/browser-gate/index\.html"',
+                rf'src="http://{re.escape(LOOPBACK)}:(\d+)/extensions/browser-gate/index\.html"',
                 shell_body,
             )
             if not asset_match:
@@ -323,21 +345,6 @@ def main() -> int:
             ):
                 raise GateFailure(f"production asset CSP changed: {asset_csp!r}")
 
-            direct_query = urllib.parse.urlencode({
-                "request_id": "direct_graph",
-                "op": "graph.detail",
-                "payload": json.dumps({"work_key": "stable-work-001"}),
-            })
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            connection.request(
-                "GET", f"/__mh_ui_ext/read/browser-gate?{direct_query}"
-            )
-            direct_graph = connection.getresponse()
-            direct_payload = json.loads(direct_graph.read())
-            connection.close()
-            if direct_graph.status != 200 or direct_payload.get("ok") is not True:
-                raise GateFailure(f"graph broker failed: {direct_payload!r}")
-
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             connection.request("POST", "/api/manage/mutate")
             management = connection.getresponse()
@@ -346,10 +353,8 @@ def main() -> int:
             if management.status != 405:
                 raise GateFailure(f"management route was not absent: {management.status}")
 
-            run_browser(browser, origin)
-            provider.wait_for(gallery=1, graph=1)
-            run_browser(browser, origin)
-            provider.wait_for(gallery=2, graph=1)
+            run_browser(browser, origin, provider, gallery=1, graph=1)
+            run_browser(browser, origin, provider, gallery=2, graph=2)
         finally:
             process.terminate()
             try:
@@ -368,6 +373,7 @@ def main() -> int:
         "parent_dom_isolation": "pass",
         "asset_csp": "pass",
         "management_route": "absent",
+        "same_iframe_gallery_then_graph": "pass",
         "browser_runs": 2,
     }, indent=2, sort_keys=True))
     return 0

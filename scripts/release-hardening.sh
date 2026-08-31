@@ -11,7 +11,7 @@ CARGO_METADATA="${OUT_DIR}/cargo-metadata.raw.json"
 DEPENDENCY_INVENTORY="${OUT_DIR}/dependency-inventory.json"
 VERSION_DISCIPLINE_REPORT="${OUT_DIR}/version-discipline.json"
 SBOM="${ARTIFACT_DIR}/sbom.cyclonedx.json"
-BINARY_NAME="mh"
+BINARY_NAMES=("mh" "mh-ui-ext")
 EXPECTED_RELEASE_REF="${EXPECTED_RELEASE_REF:-main}"
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${ROOT}/target}"
 if [[ "${CARGO_TARGET_DIR}" != /* ]]; then
@@ -82,12 +82,13 @@ run "${VENV_DIR}/bin/python" -m pip install -e "${ROOT}/sdk/python" pytest
 run "${VENV_DIR}/bin/python" -m pytest "${ROOT}/sdk/python/tests"
 run "${VENV_DIR}/bin/python" -m pip install "setuptools>=68" wheel
 
-run cargo build --release -p mh-cli --locked
+run cargo build --release -p mh-cli --bins --locked
 run "${CARGO_TARGET_DIR}/release/mh" --help
+run "${CARGO_TARGET_DIR}/release/mh-ui-ext" --help
 run "${CARGO_TARGET_DIR}/release/mh" init-db "${OUT_DIR}/scratch.db"
 run "${CARGO_TARGET_DIR}/release/mh" inspect "${OUT_DIR}/scratch.db"
 run "${CARGO_TARGET_DIR}/release/mh" discover "${OUT_DIR}/scratch.db" "${ROOT}/plugins.d" example
-run tar -czf "${ARTIFACT_DIR}/${binary_package}" -C "${CARGO_TARGET_DIR}/release" "${BINARY_NAME}"
+run tar -czf "${ARTIFACT_DIR}/${binary_package}" -C "${CARGO_TARGET_DIR}/release" "${BINARY_NAMES[@]}"
 run "${VENV_DIR}/bin/python" -m pip wheel --no-deps --no-build-isolation -w "${ARTIFACT_DIR}" "${ROOT}/sdk/python"
 wheel_files=("${ARTIFACT_DIR}"/magazine_core_plugin_sdk-*.whl)
 if [[ "${wheel_files[0]}" == "${ARTIFACT_DIR}/magazine_core_plugin_sdk-*.whl" || ! -f "${wheel_files[0]}" ]]; then
@@ -237,6 +238,7 @@ components.append(
         "properties": [
             {"name": "release.platform", "value": platform_slug},
             {"name": "release.package", "value": binary_package},
+            {"name": "release.binaries", "value": "mh,mh-ui-ext"},
         ],
     }
 )
@@ -285,6 +287,9 @@ inventory = {
     "schema": "magazine-core.release-dependency-inventory.v1",
     "git_sha": sha,
     "platform": platform_slug,
+    "release_artifacts": [
+        {"package": binary_package, "binaries": ["mh", "mh-ui-ext"]},
+    ],
     "cargo_packages": [
         {
             "name": package["name"],
@@ -382,6 +387,8 @@ if [[ "${platform_slug}" == "linux-x86_64" ]]; then
     RELEASE_TAG="${release_ref}" \
     RELEASE_BASE_URL="file://${ARTIFACT_DIR}" \
     VERIFY_UI=1 \
+    VERIFY_TRUSTED_UI=1 \
+    TRUSTED_UI_GATE="${ROOT}/examples/trusted-ui-extension-host/verify.py" \
     bash "${ROOT}/scripts/verify-standalone-quickstart.sh"
   artifact_quickstart_status="pass"
 fi
@@ -416,10 +423,11 @@ cat > "${REPORT}" <<EOF
 - cargo metadata license inventory: pass
 - rg secret pattern scan: pass
 - mh CLI init-db/inspect/discover smoke: pass
+- mh-ui-ext CLI help smoke: pass
 - binary package (${binary_package}): pass
 - Python SDK wheel package: pass
 - Python SDK wheel install smoke: pass
-- release artifact quickstart + UI smoke: ${artifact_quickstart_status}
+- release artifact quickstart + UI + trusted extension smoke: ${artifact_quickstart_status}
 - CycloneDX SBOM generation: pass
 - worktree common secret-pattern scan: pass
 - git history common secret-pattern scan: pass

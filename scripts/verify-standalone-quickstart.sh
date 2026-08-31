@@ -7,6 +7,8 @@ RELEASE_BASE_URL="${RELEASE_BASE_URL:-https://github.com/${REPO}/releases/downlo
 WORK_DIR="${WORK_DIR:-}"
 KEEP_WORKDIR="${KEEP_WORKDIR:-0}"
 VERIFY_UI="${VERIFY_UI:-auto}"
+VERIFY_TRUSTED_UI="${VERIFY_TRUSTED_UI:-auto}"
+TRUSTED_UI_GATE="${TRUSTED_UI_GATE:-}"
 UI_PID=""
 UI_PORT=""
 
@@ -122,6 +124,33 @@ binary_package="magazine-core-mh-linux-x86_64.tar.gz"
 run tar -xzf "${binary_package}"
 [[ -x "./mh" ]] || fail "binary tarball did not produce executable ./mh"
 run ./mh --help > mh-help.txt
+
+trusted_ui_supported=0
+if [[ -x "./mh-ui-ext" ]]; then
+  trusted_ui_supported=1
+fi
+case "${VERIFY_TRUSTED_UI}" in
+  1 | true | yes) trusted_ui_required=1 ;;
+  0 | false | no) trusted_ui_required=0 ;;
+  auto) trusted_ui_required="${trusted_ui_supported}" ;;
+  *) fail "VERIFY_TRUSTED_UI must be auto, 1, or 0" ;;
+esac
+
+if [[ "${trusted_ui_required}" == "1" && "${trusted_ui_supported}" != "1" ]]; then
+  fail "VERIFY_TRUSTED_UI=1 but the binary tarball has no executable ./mh-ui-ext"
+fi
+
+if [[ "${trusted_ui_required}" == "1" ]]; then
+  run ./mh-ui-ext --help > mh-ui-ext-help.txt
+fi
+
+if [[ "${trusted_ui_required}" == "1" && -n "${TRUSTED_UI_GATE}" ]]; then
+  [[ -f "${TRUSTED_UI_GATE}" ]] || fail "trusted UI gate does not exist: ${TRUSTED_UI_GATE}"
+  run env \
+    MH_BIN="${WORK_DIR}/mh" \
+    MH_UI_EXT_BIN="${WORK_DIR}/mh-ui-ext" \
+    python3 "${TRUSTED_UI_GATE}"
+fi
 
 shopt -s nullglob
 wheel_files=(magazine_core_plugin_sdk-*.whl)

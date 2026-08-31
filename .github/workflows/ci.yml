@@ -62,5 +62,10 @@ jobs:
       - name: ui extension isolation real-browser spike
         run: .venv/bin/python examples/ui-extension-isolation-spike/verify.py
 
+      - name: trusted UI extension host real-browser gate
+        run: |
+          cargo build -p mh-cli --bins --locked
+          .venv/bin/python examples/trusted-ui-extension-host/verify.py
+
       - name: golden oracle parity
         run: bash conformance/check_golden.sh
