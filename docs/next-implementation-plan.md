@@ -127,7 +127,9 @@ generic gap.
 
 The 1.2.0 release dispatch exposed one macOS-only test-fixture path overflow
 before assets were published. Current bounded work shortens only those fixture
-paths and prepares `1.2.1`; runtime code and stable contracts are unchanged.
+paths and prepares `1.2.1`. It also separates the browser gate's DOM assertions
+from its bounded WebRTC UDP observation; runtime code and stable contracts are
+unchanged.
 Release execution after merge must run
 `scripts/cut-release.sh 1.2.1 <exact-release-commit-sha>` from a clean checkout
 where that commit is reachable from `origin/main`.

@@ -11,6 +11,8 @@ to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Shortened Unix socket fixture paths so the trusted provider permission test
   also fits macOS `sockaddr_un` limits when CI supplies a long temporary root.
+- Separated the browser isolation DOM assertions from the bounded WebRTC UDP
+  observation so slow ICE completion cannot leave the CI result at `pending`.
 
 ### Compatibility
 
